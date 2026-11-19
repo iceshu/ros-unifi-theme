@@ -17,8 +17,16 @@ const LINKS = [
   { href: "/", label: "概览", icon: IconOverview },
   { href: "/devices", label: "设备", icon: IconDevices },
   { href: "/interfaces", label: "接口", icon: IconPorts },
+  { href: "/wifi", label: "WiFi", icon: IconPorts },
   { href: "/firewall", label: "防火墙", icon: IconShield },
+  { href: "/nat", label: "NAT", icon: IconShield },
+  { href: "/address-lists", label: "地址列表", icon: IconDevices },
   { href: "/routes", label: "路由", icon: IconRoutes },
+  { href: "/dhcp", label: "DHCP", icon: IconDevices },
+  { href: "/dns", label: "DNS", icon: IconRoutes },
+  { href: "/neighbors", label: "邻居", icon: IconDevices },
+  { href: "/queues", label: "队列", icon: IconPorts },
+  { href: "/log", label: "日志", icon: IconOverview },
   { href: "/wireguard", label: "WireGuard", icon: IconTunnel },
 ];
 

@@ -51,6 +51,23 @@ export interface DashboardApi {
   leases: Accessor<RosRecord[]>;
   arp: Accessor<RosRecord[]>;
   firewall: Accessor<RosRecord[]>;
+  nat: Accessor<RosRecord[]>;
+  mangle: Accessor<RosRecord[]>;
+  addressLists: Accessor<RosRecord[]>;
+  dhcpServers: Accessor<RosRecord[]>;
+  dhcpNetworks: Accessor<RosRecord[]>;
+  pools: Accessor<RosRecord[]>;
+  dns: Accessor<RosRecord | null>;
+  dnsStatic: Accessor<RosRecord[]>;
+  neighbors: Accessor<RosRecord[]>;
+  queues: Accessor<RosRecord[]>;
+  vlans: Accessor<RosRecord[]>;
+  wifi: Accessor<RosRecord[]>;
+  wifiConfig: Accessor<RosRecord[]>;
+  wifiRegistration: Accessor<RosRecord[]>;
+  pppActive: Accessor<RosRecord[]>;
+  packages: Accessor<RosRecord[]>;
+  logEntries: Accessor<RosRecord[]>;
   routes: Accessor<RosRecord[]>;
   listMembers: Accessor<RosRecord[]>;
   bridgePorts: Accessor<RosRecord[]>;
@@ -118,6 +135,43 @@ export function createDashboard(): DashboardApi {
   const [rates, setRates] = createSignal<Record<string, Rate>>({});
   const [history, setHistory] = createSignal<Record<string, HistoryPoint[]>>({});
 
+  const [nat, setNat] = createSignal<RosRecord[]>([]);
+  const [mangle, setMangle] = createSignal<RosRecord[]>([]);
+  const [addressLists, setAddressLists] = createSignal<RosRecord[]>([]);
+  const [dhcpServers, setDhcpServers] = createSignal<RosRecord[]>([]);
+  const [dhcpNetworks, setDhcpNetworks] = createSignal<RosRecord[]>([]);
+  const [pools, setPools] = createSignal<RosRecord[]>([]);
+  const [dns, setDns] = createSignal<RosRecord | null>(null);
+  const [dnsStatic, setDnsStatic] = createSignal<RosRecord[]>([]);
+  const [neighbors, setNeighbors] = createSignal<RosRecord[]>([]);
+  const [queues, setQueues] = createSignal<RosRecord[]>([]);
+  const [vlans, setVlans] = createSignal<RosRecord[]>([]);
+  const [wifi, setWifi] = createSignal<RosRecord[]>([]);
+  const [wifiConfig, setWifiConfig] = createSignal<RosRecord[]>([]);
+  const [wifiRegistration, setWifiRegistration] = createSignal<RosRecord[]>([]);
+  const [pppActive, setPppActive] = createSignal<RosRecord[]>([]);
+  const [packages, setPackages] = createSignal<RosRecord[]>([]);
+  const [logEntries, setLogEntries] = createSignal<RosRecord[]>([]);
+  const extraLists: Record<string, (rows: RosRecord[]) => unknown> = {
+    "/rest/ip/firewall/nat": setNat,
+    "/rest/ip/firewall/mangle": setMangle,
+    "/rest/ip/firewall/address-list": setAddressLists,
+    "/rest/ip/dhcp-server": setDhcpServers,
+    "/rest/ip/dhcp-server/network": setDhcpNetworks,
+    "/rest/ip/pool": setPools,
+    "/rest/ip/dns": (rows) => setDns(rows[0] ?? null),
+    "/rest/ip/dns/static": setDnsStatic,
+    "/rest/ip/neighbor": setNeighbors,
+    "/rest/queue/simple": setQueues,
+    "/rest/interface/vlan": setVlans,
+    "/rest/interface/wifi": setWifi,
+    "/rest/interface/wifi/configuration": setWifiConfig,
+    "/rest/interface/wifi/registration-table": setWifiRegistration,
+    "/rest/ppp/active": setPppActive,
+    "/rest/system/package": setPackages,
+    "/rest/log": (rows) => setLogEntries(rows.slice(-200)),
+  };
+
   const lastCounters = new Map<string, Counter>();
   let wake = () => {};
   let hurry = false;
@@ -175,7 +229,7 @@ export function createDashboard(): DashboardApi {
 
   async function readRest(path: string): Promise<{ rows: RosRecord[] | null; missing: boolean; error: ApiError | null; raw: unknown }> {
     try {
-      const raw = await getRest(path);
+      const raw = await getRest(path === "/rest/log" ? `${path}?.proplist=time,topics,message` : path);
       return { rows: asRecords(raw), missing: false, error: null, raw };
     } catch (cause) {
       const api = toApiError(cause);
@@ -204,6 +258,7 @@ export function createDashboard(): DashboardApi {
       "/rest/ip/route",
       "/rest/interface/wireguard",
       "/rest/interface/wireguard/peers",
+      ...Object.keys(extraLists),
     ].map((path) => async () => ({ path, result: await readRest(path) }));
 
     const settled = await runPool(jobs, 3);
@@ -216,6 +271,7 @@ export function createDashboard(): DashboardApi {
       const { path, result } = item.value;
       if (result.error && !failure) failure = result.error;
       const rows = result.rows ?? [];
+      if (extraLists[path] && !result.error) extraLists[path](rows);
       if (path === "/rest/system/resource") {
         if (result.missing) {
           failure ??= new ApiError(
@@ -318,6 +374,8 @@ export function createDashboard(): DashboardApi {
     leases,
     arp,
     firewall,
+    nat, mangle, addressLists, dhcpServers, dhcpNetworks, pools, dns, dnsStatic,
+    neighbors, queues, vlans, wifi, wifiConfig, wifiRegistration, pppActive, packages, logEntries,
     routes,
     listMembers,
     bridgePorts,

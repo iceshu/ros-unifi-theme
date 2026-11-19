@@ -1,4 +1,4 @@
-import { createMemo, For } from "solid-js";
+import { createMemo, createSignal, For } from "solid-js";
 import { EmptyState, PageHeader, Pill, RateText } from "../components/ui";
 import { formatBytes } from "../lib/format";
 import {
@@ -12,6 +12,7 @@ import {
   type Role,
   type RosRecord,
 } from "../lib/model";
+import { AllFields, ReadTable } from "../components/ReadData";
 import { useDashboard } from "../lib/store";
 
 export function InterfacesPage() {
@@ -92,6 +93,7 @@ export function InterfacesPage() {
           </table>
         </div>
       )}
+      <div class="mt-4"><ReadTable title="VLAN" rows={dash.vlans()} fields={["name", "interface", "vlan-id", "mtu", "running", "disabled"]} /></div>
     </div>
   );
 }
@@ -110,6 +112,7 @@ function PortTile(props: { row: RosRecord; role: Role; speed?: string; bridge?: 
 }
 
 function IfaceRow(props: { name: string; role: Role }) {
+  const [expanded, setExpanded] = createSignal(false);
   const dash = useDashboard();
   const row = createMemo(() => dash.interfaces().find((item) => item.name === props.name));
   const rate = createMemo(() => dash.rates()[props.name]);
@@ -124,9 +127,10 @@ function IfaceRow(props: { name: string; role: Role }) {
     );
   });
   return (
-    <tr class={props.role === "wan" ? "row-wan" : ""}>
+    <>
+    <tr class={`${props.role === "wan" ? "row-wan" : ""} cursor-pointer`} onClick={() => setExpanded(!expanded())}>
       <td>
-        <div class="font-medium">{props.name}</div>
+        <button type="button" class="font-medium" aria-expanded={expanded() ? "true" : "false"} onClick={(event) => { event.stopPropagation(); setExpanded(!expanded()); }}>{expanded() ? "▾" : "▸"} {props.name}</button>
         <div class="text-xs text-faint">
           {typeLabel(row()?.type)}
           {row()?.comment ? ` · ${row()?.comment}` : ""}
@@ -150,5 +154,10 @@ function IfaceRow(props: { name: string; role: Role }) {
       </td>
       <td class={errors() > 0 ? "text-warn" : "text-muted"}>{errors()}</td>
     </tr>
+    {expanded() ? <tr><td colspan={7}>
+      <h3 class="text-xs text-faint">全部字段 · interface</h3><AllFields row={row() ?? {}} />
+      {dash.ethernet().find((item) => item.name === props.name) ? <><h3 class="text-xs text-faint">全部字段 · ethernet</h3><AllFields row={dash.ethernet().find((item) => item.name === props.name)!} /></> : null}
+    </td></tr> : null}
+    </>
   );
 }
