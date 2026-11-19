@@ -59,6 +59,8 @@ export function ConnectionPage() {
       </section>
       <section class="card mb-4 grid gap-4 p-5 md:grid-cols-2">
         <Field label="路由器" value={dash.meta()?.host || "—"} />
+        <Field label="写操作" value={dash.meta()?.writeEnabled ? "已启用" : "未启用"} />
+        <p class="text-sm text-warn">启用写操作需要单独的 RouterOS 用户具备 write 权限；必须仅限局域网使用，不要暴露公网。</p>
         <Field label="用户" value={dash.meta()?.user || "未配置"} />
         <Field label="密码" value={dash.meta()?.passwordConfigured ? "已在服务端配置" : "未配置"} />
         <Field label="证书校验" value={dash.meta()?.tlsInsecure ? "已跳过（仅建议用于局域网自签证书）" : "严格"} />
@@ -78,7 +80,7 @@ export function ConnectionPage() {
       </div>
       <section class="card mt-4 p-5">
         <h2 class="font-semibold">代理允许读取的路径</h2>
-        <p class="mt-2 text-sm text-muted">其它路径会直接拒绝，包括用户、脚本、导出和 monitor-traffic。写方法一律返回 405。</p>
+        <p class="mt-2 text-sm text-muted">其它路径会直接拒绝，包括用户、脚本、导出和 monitor-traffic。写操作默认关闭（405）；启用后仅允许接口、防火墙 filter 和 WireGuard peer 的启用/禁用。</p>
         <ul class="mt-3 grid gap-1 font-mono text-xs text-muted sm:grid-cols-2">
           {(dash.meta()?.allowedPaths ?? []).map((path) => (
             <li>{path}</li>

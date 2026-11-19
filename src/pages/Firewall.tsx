@@ -1,3 +1,4 @@
+import { WriteToggle } from "../components/WriteToggle";
 import { createMemo, createSignal, For } from "solid-js";
 import { EmptyState, PageHeader, Pill } from "../components/ui";
 import { formatBytes } from "../lib/format";
@@ -73,6 +74,7 @@ export function FirewallPage() {
                       <td>
                         <Pill tone={actionTone(rule().action)}>{actionLabel(rule().action)}</Pill>
                         {flag(rule().disabled) ? <span class="ml-2 text-[11px] text-faint">禁用</span> : null}
+                        <WriteToggle path="/rest/ip/firewall/filter" row={rule()} />
                       </td>
                       <td class="whitespace-nowrap text-sm text-muted">
                         <div>{formatBytes(num(rule().bytes) ?? 0)}</div>

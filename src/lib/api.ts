@@ -6,7 +6,8 @@ export interface Meta {
   passwordConfigured: boolean;
   wanInterfaces: string[];
   lanInterfaces: string[];
-  readonly: true;
+  readonly: boolean;
+  writeEnabled: boolean;
   tlsInsecure: boolean;
   timeoutMs: number;
   version: string;
@@ -31,10 +32,10 @@ export function toApiError(error: unknown): ApiError {
   return new ApiError(0, "network", "网络请求失败");
 }
 
-export async function requestJson(path: string): Promise<unknown> {
+export async function requestJson(path: string, init: RequestInit = {}): Promise<unknown> {
   let response: Response;
   try {
-    response = await fetch(path, { headers: { Accept: "application/json" } });
+    response = await fetch(path, { ...init, headers: { Accept: "application/json", ...init.headers } });
   } catch {
     throw new ApiError(0, "proxy_down", "连不上本机上的仪表代理。开发时请确认 npm run dev 仍在运行。");
   }
@@ -57,6 +58,18 @@ export async function requestJson(path: string): Promise<unknown> {
     throw new ApiError(response.status, code, message);
   }
   return payload;
+}
+
+export async function writeRest(path: string, method: "PATCH" | "POST" | "PUT" | "DELETE", body: Record<string, unknown>): Promise<unknown> {
+  try {
+    return await requestJson(path, {
+      method,
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+  } catch (error) {
+    throw toApiError(error);
+  }
 }
 
 export function getMeta(): Promise<Meta> {

@@ -1,3 +1,4 @@
+import { WriteToggle } from "../components/WriteToggle";
 import { For, Show } from "solid-js";
 import { EmptyState, PageHeader, Pill } from "../components/ui";
 import { formatBytes, formatLastSeen } from "../lib/format";
@@ -64,6 +65,7 @@ export function WireGuardPage() {
                             <Info label="接收" value={formatBytes(num(peer.rx) ?? 0)} />
                             <Info label="发送" value={formatBytes(num(peer.tx) ?? 0)} />
                           </dl>
+                          <WriteToggle path="/rest/interface/wireguard/peers" row={peer} />
                           {flag(peer.disabled) ? <p class="mt-2 text-xs text-warn">这个 peer 在路由器上是禁用的。</p> : null}
                         </article>
                       )}

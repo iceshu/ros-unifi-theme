@@ -1,3 +1,4 @@
+import { WriteToggle } from "../components/WriteToggle";
 import { createMemo, For } from "solid-js";
 import { EmptyState, PageHeader, Pill, RateText } from "../components/ui";
 import { formatBytes } from "../lib/format";
@@ -137,6 +138,7 @@ function IfaceRow(props: { name: string; role: Role }) {
       </td>
       <td>
         <Pill tone={linkState(row()).tone}>{linkState(row()).label}</Pill>
+        <WriteToggle path="/rest/interface" row={row()} />
       </td>
       <td>
         <RateText bps={rate()?.rxBps} />
