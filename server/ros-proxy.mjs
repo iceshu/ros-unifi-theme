@@ -17,6 +17,7 @@ export const ALLOWED_PATHS = [
   "/rest/interface/ethernet",
   "/rest/interface/bridge",
   "/rest/interface/bridge/port",
+  "/rest/interface/bridge/host",
   "/rest/interface/list",
   "/rest/interface/list/member",
   "/rest/interface/pppoe-client",
@@ -26,6 +27,7 @@ export const ALLOWED_PATHS = [
   "/rest/ip/arp",
   "/rest/ip/dhcp-server/lease",
   "/rest/ip/firewall/filter",
+  "/rest/ip/firewall/connection",
   "/rest/ip/route",
 ];
 

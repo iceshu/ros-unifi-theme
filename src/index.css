@@ -314,6 +314,70 @@ a.topo-node:hover {
   background: rgba(255, 255, 255, 0.12);
 }
 
+.topo-spine,
+.topo-ports {
+  display: flex;
+  gap: 0.5rem;
+  overflow-x: auto;
+  padding-bottom: 0.25rem;
+}
+
+.topo-ports {
+  margin-top: 0.75rem;
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+  padding-top: 0.75rem;
+}
+
+.topo-col {
+  display: flex;
+  min-width: 148px;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.topo-chip,
+.topo-client {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  gap: 0.55rem;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 10px;
+  background: rgba(0, 0, 0, 0.18);
+  padding: 0.45rem 0.55rem;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.topo-chip {
+  min-width: 132px;
+}
+
+.topo-client.is-off {
+  opacity: 0.45;
+}
+
+.drawer-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  background: rgba(0, 0, 0, 0.45);
+}
+
+.drawer {
+  position: fixed;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 50;
+  width: min(420px, 100%);
+  overflow: auto;
+  border-left: 1px solid rgba(255, 255, 255, 0.06);
+  background: #14181d;
+  padding: 1rem 1.1rem 2rem;
+}
+
 .client {
   display: flex;
   align-items: center;

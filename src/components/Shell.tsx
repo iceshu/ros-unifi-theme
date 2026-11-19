@@ -2,6 +2,7 @@ import { createEffect, type ParentProps } from "solid-js";
 import { useLocation } from "@solidjs/router";
 import { formatAgo, formatBps } from "../lib/format";
 import { useDashboard } from "../lib/store";
+import { DetailDrawer } from "./DetailDrawer";
 import {
   IconDevices,
   IconMark,
@@ -123,6 +124,7 @@ export function Shell(props: ParentProps) {
           </div>
         ) : null}
         <main class="px-4 py-5 md:px-8 md:py-6">{props.children}</main>
+        <DetailDrawer />
       </div>
     </div>
   );

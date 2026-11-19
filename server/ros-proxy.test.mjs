@@ -197,6 +197,8 @@ test("proxy is read-only, allowlisted, and does not leak the password", async ()
       assert.equal(metaBody.readonly, true);
       assert.deepEqual(metaBody.wanInterfaces, ["liantong", "ether0"]);
       assert.equal(metaBody.allowedPaths.includes("/rest/ip/firewall/filter"), true);
+      assert.equal(metaBody.allowedPaths.includes("/rest/ip/firewall/connection"), true);
+      assert.equal(metaBody.allowedPaths.includes("/rest/interface/bridge/host"), true);
       assert.equal(metaBody.allowedPaths.includes("/rest/user"), false);
     },
   );
@@ -211,7 +213,11 @@ test("x86 missing menus are not_found instead of a surfaced router error", async
     },
     {
       request: async (target) => {
-        if (target.pathname === "/rest/system/routerboard" || target.pathname === "/rest/interface/wireguard") {
+        if (
+          target.pathname === "/rest/system/routerboard" ||
+          target.pathname === "/rest/interface/wireguard" ||
+          target.pathname === "/rest/interface/bridge/host"
+        ) {
           const name = target.pathname.split("/").pop();
           return {
             status: 400,
@@ -246,6 +252,11 @@ test("x86 missing menus are not_found instead of a surfaced router error", async
       assert.equal(board.status, 404);
       assert.equal(boardBody.code, "not_found");
       assert.equal(String(boardBody.message).includes("no such command"), false);
+
+      const hosts = await fetch(`${base}/rest/interface/bridge/host`);
+      const hostsBody = await hosts.json();
+      assert.equal(hosts.status, 404);
+      assert.equal(hostsBody.code, "not_found");
 
       const wireguard = await fetch(`${base}/rest/interface/wireguard`);
       const wireguardBody = await wireguard.json();

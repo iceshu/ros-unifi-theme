@@ -246,6 +246,18 @@ export function demoBody(pathname, nowMs = Date.now()) {
       ];
     case "/rest/interface/bridge":
       return [{ ".id": "*A", name: "bridge1", running: "true", disabled: "false", comment: "局域网" }];
+    case "/rest/interface/bridge/host":
+      return [
+        { ".id": "*L", "mac-address": "02:00:5E:00:00:11", "on-interface": "bridge1", bridge: "bridge1", local: "true", vid: "1" },
+        host("*H1", "02:00:5E:10:00:21", "ether1"),
+        host("*H2", "02:00:5E:10:00:22", "ether2"),
+        host("*H3", "02:00:5E:10:00:23", "ether2"),
+        host("*H4", "02:00:5E:10:00:24", "ether1"),
+        host("*H5", "02:00:5E:10:00:25", "ether3"),
+        host("*H6", "02:00:5E:10:00:26", "ether4"),
+        host("*H7", "02:00:5E:10:00:30", "ether3"),
+        host("*H8", "02:00:5E:10:00:40", "ether2"),
+      ];
     case "/rest/interface/bridge/port":
       return [
         { ".id": "*1", bridge: "bridge1", interface: "ether1", disabled: "false" },
@@ -374,6 +386,14 @@ export function demoBody(pathname, nowMs = Date.now()) {
         lease("*7", "192.168.2.30", "02:00:5E:10:00:30", "客房平板", "bound", "2h", "1h12m"),
         lease("*8", "192.168.2.51", "02:00:5E:10:00:51", "旧笔记本", "waiting", "3d", ""),
       ];
+    case "/rest/ip/firewall/connection":
+      return [
+        flow(nowMs, "*C1", "192.168.2.21", "203.0.113.50", "tcp", 2.4e6, 18e6),
+        flow(nowMs, "*C2", "192.168.2.21", "203.0.113.51", "udp", 0.2e6, 1.1e6),
+        flow(nowMs, "*C3", "192.168.2.24", "203.0.113.60", "tcp", 8e6, 40e6),
+        flow(nowMs, "*C4", "192.168.2.23", "203.0.113.70", "tcp", 0.4e6, 3e6),
+        flow(nowMs, "*C5", "9.9.9.9", "192.168.2.22", "tcp", 1e6, 0.2e6),
+      ];
     case "/rest/ip/firewall/filter":
       return [
         rule("*1", "input", "accept", "放行已建立、相关和未跟踪的连接", { "connection-state": "established,related,untracked" }, "8122331", "19021"),
@@ -458,6 +478,35 @@ export function demoBody(pathname, nowMs = Date.now()) {
     default:
       return null;
   }
+}
+
+function host(id, mac, port) {
+  return {
+    ".id": id,
+    "mac-address": mac,
+    "on-interface": port,
+    bridge: "bridge1",
+    local: "false",
+    vid: "1",
+  };
+}
+
+function flow(nowMs, id, src, dst, protocol, upBps, downBps) {
+  const seconds = Math.max(1, (nowMs - DEMO_ORIGIN_MS) / 1000);
+  const inbound = src.split(".").length === 4 && !src.startsWith("192.168.2.");
+  const orig = inbound ? downBps : upBps;
+  const repl = inbound ? upBps : downBps;
+  return {
+    ".id": id,
+    protocol,
+    "src-address": `${src}${protocol === "icmp" ? "" : ":443"}`,
+    "dst-address": `${dst}${protocol === "icmp" ? "" : ":51515"}`,
+    "orig-bytes": String(Math.round((orig / 8) * seconds)),
+    "repl-bytes": String(Math.round((repl / 8) * seconds)),
+    "orig-rate": String(Math.round(orig)),
+    "repl-rate": String(Math.round(repl)),
+    "tcp-state": protocol === "tcp" ? "established" : "",
+  };
 }
 
 function lease(id, address, mac, host, status, lastSeen, expires, comment = "") {
