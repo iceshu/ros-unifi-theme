@@ -26,14 +26,14 @@ export function Ring(props: { percent: number | null }) {
   };
   const color = () => {
     const value = props.percent;
-    if (value == null) return "#64788d";
-    if (value >= 90) return "#ff5d73";
-    if (value >= 75) return "#ffb020";
-    return "#4aa3ff";
+    if (value == null) return "#8a99a8";
+    if (value >= 90) return "#ff4d4f";
+    if (value >= 75) return "#ff9f1c";
+    return "#006fff";
   };
   return (
     <svg viewBox="0 0 72 72" class="h-16 w-16 shrink-0" aria-hidden="true">
-      <circle cx="36" cy="36" r={radius} fill="none" stroke="#243140" stroke-width="6" />
+      <circle cx="36" cy="36" r={radius} fill="none" stroke="#e3e8ef" stroke-width="6" />
       <circle
         cx="36"
         cy="36"
@@ -70,7 +70,7 @@ export function EmptyState(props: { title: string; detail?: string }) {
 }
 
 export function Skeleton(props: { class?: string }) {
-  return <div class={`animate-pulse rounded-xl bg-white/5 ${props.class ?? "h-8 w-32"}`} />;
+  return <div class={`animate-pulse rounded-xl bg-line ${props.class ?? "h-8 w-32"}`} />;
 }
 
 export function toneClass(tone: Tone): string {

@@ -76,10 +76,10 @@ export function Shell(props: ParentProps) {
         </div>
       </aside>
       <div class="shell">
-        <header class="sticky top-0 z-20 border-b border-line/80 bg-canvas/80 px-4 py-3 backdrop-blur md:px-8">
+        <header class="sticky top-0 z-20 border-b border-line bg-panel px-4 py-3 backdrop-blur md:px-8">
           <div class="flex flex-wrap items-center justify-between gap-3">
             <div>
-              <div class="text-sm text-muted">{dash.identity()?.name || "正在读取身份"}</div>
+              <div class="text-sm font-semibold text-ink">{dash.identity()?.name || "正在读取身份"}</div>
               <div class="font-mono text-xs text-faint">
                 {dash.clock()?.date || "—"} {dash.clock()?.time || ""} {dash.clock()?.["time-zone-name"] || ""}
               </div>
@@ -88,9 +88,9 @@ export function Shell(props: ParentProps) {
               <div class="hidden text-right sm:block">
                 <div class="text-[11px] text-faint">互联网 {dash.primaryWan() || ""}</div>
                 <div class="font-mono text-xs text-muted">
-                  <span>↓ {formatBps(throughput()?.rxBps ?? null)?.value ?? "—"}</span>
+                  <span class="text-accent">↓ {formatBps(throughput()?.rxBps ?? null)?.value ?? "—"}</span>
                   <span class="ml-1 text-faint">{formatBps(throughput()?.rxBps ?? null)?.unit ?? ""}</span>
-                  <span class="ml-3">↑ {formatBps(throughput()?.txBps ?? null)?.value ?? "—"}</span>
+                  <span class="ml-3 text-good">↑ {formatBps(throughput()?.txBps ?? null)?.value ?? "—"}</span>
                   <span class="ml-1 text-faint">{formatBps(throughput()?.txBps ?? null)?.unit ?? ""}</span>
                 </div>
               </div>
@@ -113,7 +113,7 @@ export function Shell(props: ParentProps) {
           <div class="banner banner-error">
             <p>{dash.error()?.message}</p>
             <span class="flex gap-3">
-              <button type="button" class="chip" onClick={() => dash.retry()}>
+              <button type="button" class="chip button-primary" onClick={() => dash.retry()}>
                 立即重试
               </button>
               <a href="/connection" class="chip">

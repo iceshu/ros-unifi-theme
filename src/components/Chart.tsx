@@ -83,33 +83,33 @@ export function ThroughputChart(props: { points: HistoryPoint[]; now: number }) 
     <svg viewBox={`0 0 ${WIDTH} ${HEIGHT}`} class="h-64 w-full" role="img" aria-label="吞吐曲线">
       <defs>
         <linearGradient id="wan-down" x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0%" stop-color="#3ec6d6" stop-opacity="0.28" />
-          <stop offset="100%" stop-color="#3ec6d6" stop-opacity="0" />
+          <stop offset="0%" stop-color="#006fff" stop-opacity="0.2" />
+          <stop offset="100%" stop-color="#006fff" stop-opacity="0.02" />
         </linearGradient>
         <linearGradient id="wan-up" x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0%" stop-color="#8fd9b4" stop-opacity="0.2" />
-          <stop offset="100%" stop-color="#8fd9b4" stop-opacity="0" />
+          <stop offset="0%" stop-color="#1fbf75" stop-opacity="0.14" />
+          <stop offset="100%" stop-color="#1fbf75" stop-opacity="0" />
         </linearGradient>
       </defs>
       {geometry().ticks.map((tick) => (
         <g>
-          <line x1={PAD.l} x2={WIDTH - PAD.r} y1={tick.y} y2={tick.y} stroke="rgba(255,255,255,0.06)" />
-          <text x="0" y={tick.y + 4} fill="#6d7680" font-size="11">
+          <line x1={PAD.l} x2={WIDTH - PAD.r} y1={tick.y} y2={tick.y} stroke="#e3e8ef" />
+          <text x="0" y={tick.y + 4} fill="#66788a" font-size="11">
             {tick.label}
           </text>
         </g>
       ))}
       {geometry().times.map((tick) => (
-        <text x={tick.x} y={HEIGHT - 6} fill="#6d7680" font-size="11" text-anchor={tick.label === "现在" ? "end" : "start"}>
+        <text x={tick.x} y={HEIGHT - 6} fill="#66788a" font-size="11" text-anchor={tick.label === "现在" ? "end" : "start"}>
           {tick.label}
         </text>
       ))}
       {geometry().downArea ? <path d={geometry().downArea} fill="url(#wan-down)" /> : null}
       {geometry().upArea ? <path d={geometry().upArea} fill="url(#wan-up)" /> : null}
       {geometry().down.length > 1 ? (
-        <path d={geometry().downLine} fill="none" stroke="#3ec6d6" stroke-width="1.8" />
+        <path d={geometry().downLine} fill="none" stroke="#006fff" stroke-width="2" />
       ) : null}
-      {geometry().up.length > 1 ? <path d={geometry().upLine} fill="none" stroke="#8fd9b4" stroke-width="1.8" /> : null}
+      {geometry().up.length > 1 ? <path d={geometry().upLine} fill="none" stroke="#1fbf75" stroke-width="2" /> : null}
     </svg>
   );
 }

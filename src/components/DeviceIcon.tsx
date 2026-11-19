@@ -2,7 +2,7 @@ import type { DeviceKind } from "../lib/model";
 
 export function DeviceIcon(props: { kind: DeviceKind }) {
   return (
-    <span class="grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-white/6 text-ink/80">
+    <span class="grid h-8 w-8 shrink-0 place-items-center rounded-lg border border-line bg-panel-2 text-muted">
       <svg viewBox="0 0 24 24" class="h-4 w-4" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true">
         {props.kind === "phone" ? (
           <rect x="8" y="3" width="8" height="18" rx="2" />

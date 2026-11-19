@@ -85,8 +85,8 @@ export function OverviewPage() {
               <div class="kicker">广域网</div>
               <div class="mt-1 truncate text-sm font-medium">{wanName() || "—"}</div>
               <div class="mt-1 font-mono text-xs text-muted">
-                <span class="text-[#8fd4dc]">↓</span> {rateText(rate()?.rxBps)}
-                <span class="ml-2 text-[#b7e7cb]">↑</span> {rateText(rate()?.txBps)}
+                <span class="text-accent">↓</span> {rateText(rate()?.rxBps)}
+                <span class="ml-2 text-good">↑</span> {rateText(rate()?.txBps)}
               </div>
             </div>
           </a>
@@ -106,8 +106,8 @@ export function OverviewPage() {
               <div class="kicker">局域网</div>
               <div class="mt-1 text-sm font-medium">{online()} 在线</div>
               <div class="mt-1 font-mono text-xs text-muted">
-                <span class="text-[#8fd4dc]">↓</span> {rateText(lanRate()?.rxBps)}
-                <span class="ml-2 text-[#b7e7cb]">↑</span> {rateText(lanRate()?.txBps)}
+                <span class="text-accent">↓</span> {rateText(lanRate()?.rxBps)}
+                <span class="ml-2 text-good">↑</span> {rateText(lanRate()?.txBps)}
               </div>
             </div>
           </a>
@@ -118,14 +118,14 @@ export function OverviewPage() {
         <div class="mb-1 flex flex-wrap items-end justify-between gap-3">
           <div class="flex flex-wrap gap-8">
             <div>
-              <div class="kicker">下载</div>
+              <div class="kicker flex items-center gap-2"><i class="h-0.5 w-3 rounded-full bg-accent" />下载</div>
               <div class="rate-xl mt-1">
                 <span class="tabular-nums">{formatBps(rate()?.rxBps ?? null)?.value ?? "—"}</span>
                 <span class="rate-unit">{formatBps(rate()?.rxBps ?? null)?.unit ?? ""}</span>
               </div>
             </div>
             <div>
-              <div class="kicker">上传</div>
+              <div class="kicker flex items-center gap-2"><i class="h-0.5 w-3 rounded-full bg-good" />上传</div>
               <div class="rate-xl mt-1">
                 <span class="tabular-nums">{formatBps(rate()?.txBps ?? null)?.value ?? "—"}</span>
                 <span class="rate-unit">{formatBps(rate()?.txBps ?? null)?.unit ?? ""}</span>
@@ -185,7 +185,7 @@ function Stat(props: { label: string; value: string; hint?: string; percent?: nu
   return (
     <div class="min-w-0">
       <div class="kicker">{props.label}</div>
-      <div class="mt-1 truncate text-sm font-medium tabular-nums">{props.value}</div>
+      <div class="mt-1 truncate text-xl font-medium tabular-nums">{props.value}</div>
       {props.percent != null ? (
         <div class="meter mt-2">
           <i style={{ width: `${Math.max(0, Math.min(100, props.percent))}%` }} />
