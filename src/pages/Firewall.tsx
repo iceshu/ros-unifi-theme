@@ -26,15 +26,12 @@ export function FirewallPage() {
 
   return (
     <div>
-      <PageHeader
-        title="防火墙"
-        description="IPv4 filter 规则，只展示链、动作、注释和主要匹配条件。没有开关，代理也会拒绝任何写回。"
-      />
+      <PageHeader title="防火墙" />
       <div class="mb-4 flex flex-wrap items-center gap-2">
         <input
           class="field"
           type="search"
-          placeholder="搜索注释、动作或匹配条件"
+          placeholder="搜索"
           value={query()}
           onInput={(event) => setQuery(event.currentTarget.value)}
         />
@@ -44,19 +41,15 @@ export function FirewallPage() {
         </For>
       </div>
       {rows().length === 0 ? (
-        <EmptyState
-          title={dash.ready() ? "没有可显示的规则" : "正在读取防火墙"}
-          detail="来自 GET /rest/ip/firewall/filter。序号与路由器上的顺序一致，从 0 开始。"
-        />
+        <EmptyState title={dash.ready() ? "没有规则" : "正在读取"} />
       ) : (
         <div class="card overflow-x-auto">
           <table class="data-table">
             <thead>
               <tr>
                 <th>序号</th>
-                <th>链</th>
+                <th>规则</th>
                 <th>动作</th>
-                <th>匹配</th>
                 <th>流量</th>
               </tr>
             </thead>
@@ -66,19 +59,20 @@ export function FirewallPage() {
                   const rule = () => item().rule;
                   const matchers = () => firewallMatchers(rule());
                   return (
-                    <tr class={flag(rule().disabled) ? "opacity-50" : ""}>
-                      <td class="font-mono text-faint">{item().index}</td>
-                      <td>{chainLabel(rule().chain)}</td>
+                    <tr class={flag(rule().disabled) ? "opacity-45" : ""}>
+                      <td class="font-mono text-xs text-faint">{item().index}</td>
                       <td>
-                        <Pill tone={actionTone(rule().action)}>{actionLabel(rule().action)}</Pill>
-                        {flag(rule().disabled) ? <div class="mt-1 text-xs text-faint">已禁用</div> : null}
-                        {rule().comment ? <div class="mt-1 max-w-xs text-sm text-muted">{rule().comment}</div> : null}
+                        <div class="font-medium">{rule().comment || matchers()[0] || "—"}</div>
+                        <div class="mt-1 flex max-w-xl flex-wrap items-center gap-1 text-[11px] text-faint">
+                          <span>{chainLabel(rule().chain)}</span>
+                          <For each={rule().comment ? matchers() : matchers().slice(1)}>
+                            {(part) => <span class="pill pill-muted">{part}</span>}
+                          </For>
+                        </div>
                       </td>
                       <td>
-                        <div class="flex max-w-xl flex-wrap gap-1.5">
-                          {matchers().length === 0 ? <span class="text-faint">无额外条件</span> : null}
-                          <For each={matchers()}>{(part) => <span class="pill pill-muted">{part}</span>}</For>
-                        </div>
+                        <Pill tone={actionTone(rule().action)}>{actionLabel(rule().action)}</Pill>
+                        {flag(rule().disabled) ? <span class="ml-2 text-[11px] text-faint">禁用</span> : null}
                       </td>
                       <td class="whitespace-nowrap text-sm text-muted">
                         <div>{formatBytes(num(rule().bytes) ?? 0)}</div>

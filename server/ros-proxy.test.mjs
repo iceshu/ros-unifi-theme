@@ -202,6 +202,70 @@ test("proxy is read-only, allowlisted, and does not leak the password", async ()
   );
 });
 
+test("x86 missing menus are not_found instead of a surfaced router error", async () => {
+  await withServer(
+    {
+      ROUTEROS_HOST: "http://192.168.2.1",
+      ROUTEROS_USER: "dashboard",
+      ROUTEROS_PASSWORD: PASSWORD,
+    },
+    {
+      request: async (target) => {
+        if (target.pathname === "/rest/system/routerboard" || target.pathname === "/rest/interface/wireguard") {
+          const name = target.pathname.split("/").pop();
+          return {
+            status: 400,
+            headers: { "content-type": "application/json" },
+            body: Buffer.from(
+              JSON.stringify({
+                error: 400,
+                message: "Bad Request",
+                detail: `no such command or directory (${name})`,
+              }),
+            ),
+          };
+        }
+        if (target.pathname === "/rest/system/resource") {
+          return {
+            status: 400,
+            headers: { "content-type": "application/json" },
+            body: Buffer.from(JSON.stringify({ error: 400, message: "Bad Request", detail: "invalid value" })),
+          };
+        }
+        return {
+          status: 404,
+          headers: { "content-type": "application/json" },
+          body: Buffer.from(JSON.stringify({ error: 404, message: "Not Found" })),
+        };
+      },
+    },
+    async (port) => {
+      const base = `http://127.0.0.1:${port}`;
+      const board = await fetch(`${base}/rest/system/routerboard`);
+      const boardBody = await board.json();
+      assert.equal(board.status, 404);
+      assert.equal(boardBody.code, "not_found");
+      assert.equal(String(boardBody.message).includes("no such command"), false);
+
+      const wireguard = await fetch(`${base}/rest/interface/wireguard`);
+      const wireguardBody = await wireguard.json();
+      assert.equal(wireguard.status, 404);
+      assert.equal(wireguardBody.code, "not_found");
+      assert.match(wireguardBody.detail, /wireguard/);
+
+      const rejected = await fetch(`${base}/rest/system/resource`);
+      const rejectedBody = await rejected.json();
+      assert.equal(rejected.status, 400);
+      assert.equal(rejectedBody.code, "router_error");
+
+      const health = await fetch(`${base}/rest/system/health`);
+      const healthBody = await health.json();
+      assert.equal(health.status, 404);
+      assert.equal(healthBody.code, "not_found");
+    },
+  );
+});
+
 test("missing credentials do not call the router", async () => {
   let called = false;
   await withServer(

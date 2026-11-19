@@ -68,7 +68,8 @@ export interface DashboardApi {
 
 const DashboardContext = createContext<DashboardApi>();
 
-const HISTORY_LIMIT = 90;
+export const HISTORY_WINDOW_MS = 5 * 60 * 1000;
+const HISTORY_LIMIT = 180;
 
 async function runPool<T>(jobs: Array<() => Promise<T>>, limit: number): Promise<Array<PromiseSettledResult<T>>> {
   const results: Array<PromiseSettledResult<T>> = new Array(jobs.length);

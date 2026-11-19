@@ -23,7 +23,7 @@ export function RoutesPage() {
 
   return (
     <div>
-      <PageHeader title="路由" description="IPv4 路由表。筛选只发生在浏览器里，不会改路由器上的路由。" />
+      <PageHeader title="路由" />
       <div class="mb-4">
         <button
           type="button"
@@ -37,7 +37,7 @@ export function RoutesPage() {
         </button>
       </div>
       {rows().length === 0 ? (
-        <EmptyState title={dash.ready() ? "没有可显示的路由" : "正在读取路由"} detail="来自 GET /rest/ip/route。" />
+        <EmptyState title={dash.ready() ? "没有路由" : "正在读取"} />
       ) : (
         <div class="card overflow-x-auto">
           <table class="data-table">

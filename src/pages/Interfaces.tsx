@@ -45,29 +45,31 @@ export function InterfacesPage() {
 
   return (
     <div>
-      <PageHeader
-        title="接口"
-        description="运行状态、收发速率和错误计数。广域网默认是 liantong 与 ether0，局域网默认是 bridge1，也可以用环境变量改。"
-      />
+      <PageHeader title="接口" />
       {ethers().length > 0 ? (
-        <section class="card mb-4 p-5">
-          <p class="kicker mb-4">以太网口</p>
-          <div class="flex gap-3 overflow-x-auto pb-1">
-            <For each={ethers()}>
+        <section class="card mb-3 p-3">
+          <div class="faceplate">
+            <For each={ethers()} keyed={(row) => row.name}>
               {(row) => (
                 <PortTile
-                  row={row}
-                  role={roleOf(row)}
-                  speed={speedOf().get(row.name)}
-                  bridge={bridgeOf().get(row.name)}
+                  row={row()}
+                  role={roleOf(row())}
+                  speed={speedOf().get(row().name)}
+                  bridge={bridgeOf().get(row().name)}
                 />
               )}
+            </For>
+            <For
+              each={dash.interfaces().filter((row) => row.type === "pppoe-out" || row.type === "bridge")}
+              keyed={(row) => row.name}
+            >
+              {(row) => <PortTile row={row()} role={roleOf(row())} />}
             </For>
           </div>
         </section>
       ) : null}
       {ordered().length === 0 ? (
-        <EmptyState title={dash.ready() ? "没有接口数据" : "正在读取接口"} detail="数据来自 GET /rest/interface。" />
+        <EmptyState title={dash.ready() ? "没有接口" : "正在读取"} />
       ) : (
         <div class="card overflow-x-auto">
           <table class="data-table">
@@ -98,16 +100,11 @@ function PortTile(props: { row: RosRecord; role: Role; speed?: string; bridge?: 
   const state = () => linkState(props.row);
   const led = () => (flag(props.row.disabled) ? "led-muted" : flag(props.row.running) ? "led-good" : "led-bad");
   return (
-    <div class={`port ${props.role === "wan" ? "shadow-[inset_0_0_0_1px_rgba(74,163,255,0.45)]" : ""}`}>
-      <div class="port-jack">
-        <span class={`led ${led()}`} />
-        <span class="text-[10px] text-faint">{props.speed || props.row.type}</span>
-      </div>
-      <div>
-        <div class="font-medium">{props.row.name}</div>
-        <div class="text-xs text-faint">{props.row.comment || props.bridge || roleLabel(props.role)}</div>
-      </div>
-      <Pill tone={state().tone}>{state().label}</Pill>
+    <div class="jack">
+      <span class={`led ${led()}`} />
+      <div class="jack-name">{props.row.name}</div>
+      <div class="jack-meta truncate">{props.row.comment || props.bridge || props.speed || roleLabel(props.role)}</div>
+      <div class="text-[11px] text-faint">{state().label}</div>
     </div>
   );
 }
@@ -127,7 +124,7 @@ function IfaceRow(props: { name: string; role: Role }) {
     );
   });
   return (
-    <tr class={props.role === "wan" ? "bg-accent/5" : ""}>
+    <tr class={props.role === "wan" ? "row-wan" : ""}>
       <td>
         <div class="font-medium">{props.name}</div>
         <div class="text-xs text-faint">

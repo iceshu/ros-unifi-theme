@@ -1,7 +1,8 @@
 import { createMemo, createSignal, For } from "solid-js";
 import { EmptyState, PageHeader, Pill } from "../components/ui";
 import { formatLastSeen } from "../lib/format";
-import { arpStatusLabel, arpStatusTone, dhcpStatusLabel, dhcpStatusTone, ipSortKey, type RosRecord } from "../lib/model";
+import { DeviceIcon } from "../components/DeviceIcon";
+import { arpStatusLabel, arpStatusTone, dhcpStatusLabel, dhcpStatusTone, ipSortKey, leaseIdentity, type RosRecord } from "../lib/model";
 import { useDashboard } from "../lib/store";
 
 type Filter = "all" | "bound" | "idle" | "reachable";
@@ -61,19 +62,16 @@ export function DevicesPage() {
 
   return (
     <div>
-      <PageHeader
-        title="设备"
-        description="DHCP 租约，并用 ARP 补充是否还在链路上。这里只能看，不能绑定、阻断或删除租约。"
-      >
-        <div class="text-sm text-muted">
-          {dash.leases().length} 条租约 · {boundCount()} 已绑定
+      <PageHeader title="设备">
+        <div class="text-xs text-faint">
+          {boundCount()} 在线 / {dash.leases().length}
         </div>
       </PageHeader>
       <div class="mb-4 flex flex-wrap items-center gap-2">
         <input
           class="field"
           type="search"
-          placeholder="搜索主机名、IP 或 MAC"
+          placeholder="搜索"
           value={query()}
           onInput={(event) => setQuery(event.currentTarget.value)}
         />
@@ -83,10 +81,7 @@ export function DevicesPage() {
         <FilterChip label="ARP 可达" on={filter() === "reachable"} click={() => setFilter("reachable")} />
       </div>
       {rows().length === 0 ? (
-        <EmptyState
-          title={dash.ready() ? "没有匹配的租约" : "正在读取 DHCP 租约"}
-          detail="列表来自 /ip/dhcp-server/lease。默认局域网是 192.168.2.0/24，但这里会显示路由器返回的全部租约。"
-        />
+        <EmptyState title={dash.ready() ? "没有设备" : "正在读取"} />
       ) : (
         <div class="card overflow-x-auto">
           <table class="data-table">
@@ -110,7 +105,7 @@ export function DevicesPage() {
       )}
       {arpOnly().length > 0 ? (
         <section class="mt-6">
-          <h2 class="mb-3 text-sm text-muted">只出现在 ARP 里</h2>
+          <h2 class="mb-2 text-xs text-faint">ARP</h2>
           <div class="card overflow-x-auto">
             <table class="data-table">
               <thead>
@@ -144,17 +139,20 @@ export function DevicesPage() {
 }
 
 function LeaseRow(props: { lease: RosRecord; arp: RosRecord | undefined }) {
-  const name = () => props.lease["host-name"] || props.lease.comment || "未命名设备";
+  const identity = () => leaseIdentity(props.lease);
   return (
     <tr>
       <td>
-        <div class="font-medium">{name()}</div>
-        {props.lease.comment && props.lease.comment !== name() ? (
-          <div class="text-xs text-faint">{props.lease.comment}</div>
-        ) : null}
+        <div class="client">
+          <DeviceIcon kind={identity().kind} />
+          <div class="min-w-0">
+            <div class={`client-name truncate ${identity().title === "未知" ? "text-faint" : ""}`}>{identity().title}</div>
+            {identity().subtitle ? <div class="client-sub truncate">{identity().subtitle}</div> : null}
+          </div>
+        </div>
       </td>
-      <td class="font-mono">{props.lease.address || "—"}</td>
-      <td class="font-mono text-sm">{props.lease["mac-address"] || "—"}</td>
+      <td class="font-mono text-xs text-muted">{props.lease.address || "—"}</td>
+      <td class="font-mono text-xs text-faint">{props.lease["mac-address"] || "—"}</td>
       <td>
         <Pill tone={dhcpStatusTone(props.lease.status)}>{dhcpStatusLabel(props.lease.status)}</Pill>
         {props.lease["expires-after"] ? (

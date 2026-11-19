@@ -3,13 +3,10 @@ import { createMemo, type ParentProps } from "solid-js";
 import { formatBps } from "../lib/format";
 import type { Tone } from "../lib/model";
 
-export function PageHeader(props: ParentProps<{ title: string; description: string }>) {
+export function PageHeader(props: ParentProps<{ title: string }>) {
   return (
-    <div class="mb-5 flex flex-wrap items-end justify-between gap-3">
-      <div>
-        <h1 class="text-2xl font-semibold tracking-tight">{props.title}</h1>
-        <p class="mt-1 max-w-2xl text-sm text-muted">{props.description}</p>
-      </div>
+    <div class="mb-3 flex flex-wrap items-center justify-between gap-3">
+      <h1 class="text-lg font-medium tracking-tight">{props.title}</h1>
       {props.children}
     </div>
   );

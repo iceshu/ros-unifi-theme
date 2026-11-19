@@ -10,21 +10,15 @@ export function WireGuardPage() {
 
   return (
     <div>
-      <PageHeader
-        title="WireGuard"
-        description="只看接口和 peer 是否在线、最近一次握手以及收发字节。私钥和预共享密钥不会显示，代理也会把它们从响应里去掉。"
-      />
+      <PageHeader title="WireGuard" />
       <Show
         when={dash.wireguardLoaded()}
-        fallback={<EmptyState title="正在读取 WireGuard" detail="如果路由器没有这个功能，读完后会说明。" />}
+        fallback={<EmptyState title={dash.error() ? "读不到 WireGuard" : "正在读取"} />}
       >
         {missing() ? (
-          <EmptyState
-            title="没有 WireGuard 数据"
-            detail="路由器未启用 WireGuard，或当前账号看不到 /interface/wireguard。这不影响其它页面。"
-          />
+          <EmptyState title="没有 WireGuard" />
         ) : (dash.wireguard()?.length ?? 0) === 0 ? (
-          <EmptyState title="没有 WireGuard 接口" detail="菜单存在，但里面是空的。" />
+          <EmptyState title="没有 WireGuard" />
         ) : (
           <div class="space-y-4">
             <For each={dash.wireguard() ?? []}>

@@ -40,12 +40,7 @@ export function ConnectionPage() {
 
   return (
     <div>
-      <div class="mb-5">
-        <h1 class="text-2xl font-semibold tracking-tight">连接</h1>
-        <p class="mt-1 max-w-2xl text-sm text-muted">
-          路由器账号只放在运行仪表的机器上。这个页面不接收密码，也没有任何会写入 RouterOS 的按钮。
-        </p>
-      </div>
+      <h1 class="mb-3 text-lg font-medium tracking-tight">连接</h1>
       <section class="card mb-4 p-5">
         <div class="flex flex-wrap items-center justify-between gap-3">
           <div>

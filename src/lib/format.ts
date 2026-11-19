@@ -1,4 +1,6 @@
 export {
+  cleanRouterText,
+  displayArch,
   formatBps,
   formatBytes,
   formatLastSeen,
