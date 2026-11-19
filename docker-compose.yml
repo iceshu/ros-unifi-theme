@@ -1,0 +1,26 @@
+# 在 N100 上：复制 .env.example 为 .env，填好密码，然后 docker compose up -d --build
+# 密码只放在 .env，经 env_file 进入容器。不要在这个文件里写 ${ROUTEROS_PASSWORD}。
+services:
+  dashboard:
+    build: .
+    image: ros-unifi-theme:local
+    restart: unless-stopped
+    ports:
+      - "${DASHBOARD_BIND:-0.0.0.0}:${DASHBOARD_PORT:-8080}:8080"
+    env_file:
+      - .env
+    environment:
+      PORT: "8080"
+      NODE_ENV: production
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "fetch('http://127.0.0.1:8080/api/health').then((r)=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))",
+        ]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
