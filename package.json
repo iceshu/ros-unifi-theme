@@ -1,0 +1,28 @@
+{
+  "name": "ros-unifi-theme",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "start": "node server/index.mjs",
+    "test": "node --test shared/format.test.mjs server/ros-proxy.test.mjs",
+    "check": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@solidjs/router": "^2.0.0",
+    "@solidjs/web": "^2.0.3",
+    "solid-js": "^2.0.3"
+  },
+  "devDependencies": {
+    "@solidjs/vite-plugin": "^3.0.1",
+    "@tailwindcss/vite": "^4.1.11",
+    "tailwindcss": "^4.1.11",
+    "typescript": "^5.8.3",
+    "vite": "^8.0.0"
+  }
+}
