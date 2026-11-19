@@ -359,6 +359,11 @@ function routerRequest(target, { method, headers, timeout, insecure, signal }) {
   });
 }
 
+function routerErrorText(parsed) {
+  if (parsed?.kind !== "json" || !parsed.value || typeof parsed.value !== "object") return "";
+  return `${parsed.value.detail || ""} ${parsed.value.message || ""}`;
+}
+
 function describeRouterFailure(status, parsed) {
   const detail =
     parsed?.kind === "json" && parsed.value && typeof parsed.value === "object"
@@ -377,7 +382,10 @@ function describeRouterFailure(status, parsed) {
       message: "路由器返回了网页而不是 REST JSON。请确认 www 或 www-ssl 提供的是 RouterOS REST，而不是别的页面。",
     };
   }
-  if (status === 404) {
+  // CHR and x86 RouterOS answer a missing menu with HTTP 400 and
+  // "no such command or directory", not 404. Treat that like a missing path
+  // so optional reads (routerboard, and any other absent command) stay quiet.
+  if (status === 404 || /no such command or directory/i.test(routerErrorText(parsed))) {
     return { code: "not_found", message: "路由器上没有这个 REST 路径。", detail };
   }
   return {
@@ -595,8 +603,9 @@ export function createHandler(env, options = {}) {
         const parsed = parseUpstream(upstream.headers, upstream.body);
         if (upstream.status >= 400 || parsed.kind === "html") {
           const failure = describeRouterFailure(upstream.status, parsed);
-          sendJson(res, upstream.status >= 400 ? upstream.status : 502, failure);
-          console.info(`[ros] GET ${pathname} ${upstream.status} ${Date.now() - started}ms`);
+          const httpStatus = failure.code === "not_found" ? 404 : upstream.status >= 400 ? upstream.status : 502;
+          sendJson(res, httpStatus, failure);
+          console.info(`[ros] GET ${pathname} ${httpStatus} ${Date.now() - started}ms`);
           return true;
         }
         if (parsed.kind !== "json") {
