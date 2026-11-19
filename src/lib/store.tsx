@@ -15,6 +15,7 @@ import {
   pickWanName,
   type RosRecord,
 } from "./model";
+import { ratesFromDeltas, summarizeConnections } from "./traffic";
 
 export interface Rate {
   rxBps: number;
@@ -26,6 +27,27 @@ export interface HistoryPoint {
   rxBps: number;
   txBps: number;
 }
+
+export interface ClientPeer {
+  ip: string;
+  bytes: number;
+  count: number;
+}
+
+export interface ClientTraffic {
+  rxBps: number | null;
+  txBps: number | null;
+  upBytes: number;
+  downBytes: number;
+  connections: number;
+  peers: ClientPeer[];
+}
+
+export type Selection =
+  | { type: "client"; ip: string; mac: string }
+  | { type: "iface"; name: string }
+  | { type: "peer"; id: string }
+  | { type: "gateway" };
 
 interface Counter {
   t: number;
@@ -74,6 +96,14 @@ export interface DashboardApi {
   wireguard: Accessor<RosRecord[] | null>;
   wireguardPeers: Accessor<RosRecord[] | null>;
   wireguardLoaded: Accessor<boolean>;
+  bridgeHosts: Accessor<RosRecord[] | null>;
+  connections: Accessor<RosRecord[] | null>;
+  connectionsLoaded: Accessor<boolean>;
+  clientTraffic: Accessor<Record<string, ClientTraffic>>;
+  clientHistory: Accessor<Record<string, HistoryPoint[]>>;
+  peerRates: Accessor<Record<string, Rate>>;
+  selection: Accessor<Selection | null>;
+  setSelection: (value: Selection | null) => void;
   rates: Accessor<Record<string, Rate>>;
   history: Accessor<Record<string, HistoryPoint[]>>;
   temperature: Accessor<{ name: string; value: number; unit: string } | null>;
@@ -132,6 +162,13 @@ export function createDashboard(): DashboardApi {
   const [wireguard, setWireguard] = createSignal<RosRecord[] | null>(null);
   const [wireguardPeers, setWireguardPeers] = createSignal<RosRecord[] | null>(null);
   const [wireguardLoaded, setWireguardLoaded] = createSignal(false);
+  const [bridgeHosts, setBridgeHosts] = createSignal<RosRecord[] | null>(null);
+  const [connections, setConnections] = createSignal<RosRecord[] | null>(null);
+  const [connectionsLoaded, setConnectionsLoaded] = createSignal(false);
+  const [clientTraffic, setClientTraffic] = createSignal<Record<string, ClientTraffic>>({});
+  const [clientHistory, setClientHistory] = createSignal<Record<string, HistoryPoint[]>>({});
+  const [peerRates, setPeerRates] = createSignal<Record<string, Rate>>({});
+  const [selection, setSelection] = createSignal<Selection | null>(null);
   const [rates, setRates] = createSignal<Record<string, Rate>>({});
   const [history, setHistory] = createSignal<Record<string, HistoryPoint[]>>({});
 
@@ -173,6 +210,8 @@ export function createDashboard(): DashboardApi {
   };
 
   const lastCounters = new Map<string, Counter>();
+  const lastPeerBytes = new Map<string, Counter>();
+  let lastClientBytes: { t: number; totals: Record<string, { up: number; down: number }> } | null = null;
   let wake = () => {};
   let hurry = false;
 
@@ -251,10 +290,12 @@ export function createDashboard(): DashboardApi {
       "/rest/interface/pppoe-client",
       "/rest/interface/list/member",
       "/rest/interface/bridge/port",
+      "/rest/interface/bridge/host",
       "/rest/ip/address",
       "/rest/ip/dhcp-server/lease",
       "/rest/ip/arp",
       "/rest/ip/firewall/filter",
+      "/rest/ip/firewall/connection",
       "/rest/ip/route",
       "/rest/interface/wireguard",
       "/rest/interface/wireguard/peers",
@@ -263,6 +304,10 @@ export function createDashboard(): DashboardApi {
 
     const settled = await runPool(jobs, 3);
     let failure: ApiError | null = null;
+    let leaseRows = leases();
+    let arpRows = arp();
+    let connectionRows: RosRecord[] | null = connections();
+    let sawConnections = false;
     for (const item of settled) {
       if (item.status === "rejected") {
         failure ??= toApiError(item.reason);
@@ -289,18 +334,88 @@ export function createDashboard(): DashboardApi {
       else if (path === "/rest/interface/list/member" && !result.error) setListMembers(result.missing ? [] : rows);
       else if (path === "/rest/interface/bridge/port" && !result.error) setBridgePorts(result.missing ? [] : rows);
       else if (path === "/rest/ip/address" && !result.error) setAddresses(result.missing ? [] : rows);
-      else if (path === "/rest/ip/dhcp-server/lease" && !result.error) setLeases(result.missing ? [] : rows);
-      else if (path === "/rest/ip/arp" && !result.error) setArp(result.missing ? [] : rows);
-      else if (path === "/rest/ip/firewall/filter" && !result.error) setFirewall(result.missing ? [] : rows);
+      else if (path === "/rest/ip/dhcp-server/lease" && !result.error) {
+        leaseRows = result.missing ? [] : rows;
+        setLeases(leaseRows);
+      } else if (path === "/rest/ip/arp" && !result.error) {
+        arpRows = result.missing ? [] : rows;
+        setArp(arpRows);
+      } else if (path === "/rest/interface/bridge/host" && !result.error) {
+        setBridgeHosts(result.missing ? null : rows);
+      } else if (path === "/rest/ip/firewall/filter" && !result.error) setFirewall(result.missing ? [] : rows);
+      else if (path === "/rest/ip/firewall/connection" && !result.error) {
+        sawConnections = true;
+        connectionRows = result.missing ? null : rows;
+        setConnectionsLoaded(true);
+        setConnections(connectionRows);
+      }
       else if (path === "/rest/ip/route" && !result.error) setRoutes(result.missing ? [] : rows);
       else if (path === "/rest/interface/wireguard" && !result.error) {
         setWireguardLoaded(true);
         setWireguard(result.missing ? null : rows);
       } else if (path === "/rest/interface/wireguard/peers" && !result.error) {
-        setWireguardPeers(result.missing ? null : rows);
+        const peers = result.missing ? null : rows;
+        setWireguardPeers(peers);
+        if (peers) setPeerRates(updatePeerRates(peers));
       }
     }
+    if (sawConnections) applyClientTraffic(connectionRows ?? [], leaseRows, arpRows);
     return failure;
+  }
+
+  function updatePeerRates(peers: RosRecord[]): Record<string, Rate> {
+    const at = Date.now();
+    const next = { ...peerRates() };
+    for (const peer of peers) {
+      const id = peer[".id"];
+      if (!id) continue;
+      const rx = Number(peer.rx);
+      const tx = Number(peer.tx);
+      if (!Number.isFinite(rx) || !Number.isFinite(tx)) continue;
+      const previous = lastPeerBytes.get(id);
+      lastPeerBytes.set(id, { t: at, rx, tx });
+      if (!previous) continue;
+      const dt = (at - previous.t) / 1000;
+      if (dt < 0.4 || dt > 40) continue;
+      if (rx < previous.rx || tx < previous.tx) continue;
+      next[id] = { rxBps: ((rx - previous.rx) * 8) / dt, txBps: ((tx - previous.tx) * 8) / dt };
+    }
+    return next;
+  }
+
+  function applyClientTraffic(rows: RosRecord[], leaseRows: RosRecord[], arpRows: RosRecord[]) {
+    const ips = [
+      ...leaseRows.map((lease) => lease.address),
+      ...arpRows.map((row) => row.address),
+    ].filter((ip) => !!ip && ip !== "0.0.0.0");
+    const summary = summarizeConnections(rows, ips);
+    const at = Date.now();
+    const dt = lastClientBytes ? (at - lastClientBytes.t) / 1000 : 0;
+    const deltas = ratesFromDeltas(lastClientBytes?.totals, summary.totals, dt);
+    lastClientBytes = { t: at, totals: summary.totals };
+    const next: Record<string, ClientTraffic> = {};
+    const nextHistory = { ...clientHistory() };
+    const seen = new Set<string>([...Object.keys(summary.totals), ...Object.keys(summary.reportedRates)]);
+    for (const ip of seen) {
+      const reported = summary.reportedRates[ip];
+      const delta = deltas[ip];
+      const rxBps = reported?.rxBps ?? delta?.rxBps ?? null;
+      const txBps = reported?.txBps ?? delta?.txBps ?? null;
+      next[ip] = {
+        rxBps,
+        txBps,
+        upBytes: summary.totals[ip]?.up ?? 0,
+        downBytes: summary.totals[ip]?.down ?? 0,
+        connections: summary.counts[ip] ?? 0,
+        peers: summary.peers[ip] ?? [],
+      };
+      if (rxBps != null && txBps != null) {
+        const series = (nextHistory[ip] ?? []).concat({ t: at, rxBps, txBps });
+        nextHistory[ip] = series.length > 40 ? series.slice(-40) : series;
+      }
+    }
+    setClientTraffic(next);
+    setClientHistory(nextHistory);
   }
 
   function retry() {
@@ -382,6 +497,14 @@ export function createDashboard(): DashboardApi {
     wireguard,
     wireguardPeers,
     wireguardLoaded,
+    bridgeHosts,
+    connections,
+    connectionsLoaded,
+    clientTraffic,
+    clientHistory,
+    peerRates,
+    selection,
+    setSelection,
     rates,
     history,
     temperature,

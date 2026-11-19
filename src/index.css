@@ -201,6 +201,58 @@ button, a, input { -webkit-tap-highlight-color: transparent; }
 }
 a.topo-node:hover { border-color: #b3d4ff; background: #f2f7ff; }
 .topo-line { height: 2px; width: 1.5rem; background: #c8d8e9; }
+.topo-spine,
+.topo-ports {
+  display: flex;
+  gap: 0.5rem;
+  overflow-x: auto;
+  padding-bottom: 0.25rem;
+}
+.topo-ports {
+  margin-top: 0.75rem;
+  border-top: 1px solid #e3e8ef;
+  padding-top: 0.75rem;
+}
+.topo-col {
+  display: flex;
+  min-width: 148px;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+.topo-chip,
+.topo-client {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  gap: 0.55rem;
+  border: 1px solid #e3e8ef;
+  border-radius: 10px;
+  background: #ffffff;
+  padding: 0.45rem 0.55rem;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.topo-chip { min-width: 132px; }
+.topo-client.is-off { opacity: 0.45; }
+.drawer-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  background: rgba(0, 0, 0, 0.45);
+}
+.drawer {
+  position: fixed;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 50;
+  width: min(420px, 100%);
+  overflow: auto;
+  border-left: 1px solid #e3e8ef;
+  background: #ffffff;
+  padding: 1rem 1.1rem 2rem;
+}
 .client { display: flex; align-items: center; gap: 0.7rem; min-width: 12rem; }
 .client-name { font-weight: 500; line-height: 1.2; }
 .client-sub { margin-top: 0.2rem; color: var(--color-muted); font-size: 0.72rem; }
