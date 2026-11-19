@@ -372,3 +372,73 @@ test("frontend source does not embed router credentials", () => {
   assert.match(readFileSync(path.resolve("README.md"), "utf8"), /192\.168\.2\.1/);
   assert.match(readFileSync(path.resolve(".gitignore"), "utf8"), /^\.env$/m);
 });
+
+
+test("writes default to off and never reach the router", async () => {
+  let calls = 0;
+  await withServer({}, { request: async () => { calls++; throw new Error("unexpected upstream"); } }, async (port) => {
+    const res = await fetch(`http://127.0.0.1:${port}/rest/interface/*1`, {
+      method: "PATCH", headers: { "Content-Type": "application/json" }, body: '{"disabled":"yes"}',
+    });
+    assert.equal(res.status, 405);
+    assert.equal((await res.json()).code, "method_not_allowed");
+    assert.equal(calls, 0);
+  });
+});
+
+test("enabled writes are narrowly validated, forwarded and redacted", async () => {
+  const calls = [];
+  const env = { ROS_WRITE_ENABLED: "true", ROUTEROS_USER: "test-writer", ROUTEROS_PASSWORD: PASSWORD };
+  await withServer(env, { request: async (target, options) => {
+    calls.push({ target, options });
+    return { status: 202, headers: { "content-type": "application/json" },
+      body: Buffer.from('{"disabled":"yes","private-key":"hidden"}') };
+  } }, async (port) => {
+    const patch = (path, body = { disabled: "yes" }, extra = {}) => fetch(`http://127.0.0.1:${port}${path}`, {
+      method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body), ...extra,
+    });
+    for (const path of ["/rest/user", "/rest/user/*1", "/rest/interface/*1/extra", "/rest/interface/ethernet", "/rest/interface/*1?disabled=no", "/rest/interface//%2A1"]) {
+      assert.equal((await patch(path)).status, 403, path);
+    }
+    for (const method of ["POST", "PUT", "DELETE"]) {
+      assert.equal((await patch("/rest/interface/*1", {}, { method })).status, 403);
+    }
+    for (const body of [{ disabled: "yes", name: "oops" }, { disabled: "yes", ".id": "*2" },
+      { disabled: "yes", password: "hidden" }, { disabled: true }, { disabled: {} }, [], null, {}]) {
+      assert.equal((await patch("/rest/interface/*1", body)).status, 400);
+    }
+    assert.equal((await patch("/rest/interface/*1", {}, { body: "{" })).status, 400);
+    assert.equal((await patch("/rest/interface/*1", {}, { headers: { "Content-Type": "text/plain" } })).status, 415);
+    assert.equal((await patch("/rest/interface/*1", { disabled: "x".repeat(65536) })).status, 413);
+    assert.equal((await patch("/rest/interface/*1", {}, { headers: { "Content-Type": "application/json", Origin: "http://evil.test" } })).status, 403);
+    assert.equal(calls.length, 0);
+    for (const path of ["/rest/interface/*1", "/rest/ip/firewall/filter/*A", "/rest/interface/wireguard/peers/%2A2"]) {
+      const res = await patch(path);
+      assert.equal(res.status, 202);
+      assert.deepEqual(await res.json(), { disabled: "yes" });
+    }
+    assert.equal(calls.length, 3);
+    assert.equal(calls[0].options.method, "PATCH");
+    assert.deepEqual(JSON.parse(calls[0].options.body), { disabled: "yes" });
+    assert.equal(calls[0].options.headers["Content-Type"], "application/json");
+    assert.equal(calls[0].options.headers.Authorization, `Basic ${Buffer.from(`test-writer:${PASSWORD}`).toString("base64")}`);
+    assert.equal(calls[0].target.pathname, "/rest/interface/*1");
+    const meta = await (await fetch(`http://127.0.0.1:${port}/api/meta`)).json();
+    assert.equal(meta.writeEnabled, true);
+    assert.equal(meta.readonly, false);
+  });
+});
+
+test("demo writes never reach upstream and unknown targets remain forbidden", async () => {
+  await withServer({ DEMO_MODE: "true", ROS_WRITE_ENABLED: "true" }, {
+    request: async () => { throw new Error("unexpected demo upstream"); },
+  }, async (port) => {
+    const patch = (path) => fetch(`http://127.0.0.1:${port}${path}`, {
+      method: "PATCH", headers: { "Content-Type": "application/json" }, body: '{"disabled":"yes"}',
+    });
+    const res = await patch("/rest/interface/*1");
+    assert.equal(res.status, 503);
+    assert.deepEqual(await res.json(), { code: "demo_readonly", message: "演示模式不执行写操作。" });
+    assert.equal((await patch("/rest/user/*1")).status, 403);
+  });
+});

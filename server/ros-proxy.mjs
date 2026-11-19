@@ -316,7 +316,7 @@ function sendJson(res, status, payload, { demo = false } = {}) {
   res.end(body);
 }
 
-function routerRequest(target, { method, headers, timeout, insecure, signal }) {
+function routerRequest(target, { method, headers, timeout, insecure, signal, body }) {
   return new Promise((resolve, reject) => {
     const lib = target.protocol === "https:" ? https : http;
     let settled = false;
@@ -372,8 +372,35 @@ function routerRequest(target, { method, headers, timeout, insecure, signal }) {
       if (signal.aborted) onAbort();
       else signal.addEventListener("abort", onAbort, { once: true });
     }
-    req.end();
+    req.end(body);
   });
+}
+
+async function readWriteBody(req) {
+  const fail = (message, status = 400, code = "bad_body") => Object.assign(new Error(message), { status, code });
+  if (!/^application\/json(?:\s*;|\s*$)/i.test(String(req.headers["content-type"] || ""))) {
+    throw fail("写操作必须使用 application/json。", 415, "content_type");
+  }
+  const chunks = [];
+  let size = 0;
+  let tooLarge = Number(req.headers["content-length"]) > 64 * 1024;
+  // Drain oversized requests without buffering them, preserving a usable HTTP error response.
+  for await (const chunk of req) {
+    size += chunk.length;
+    if (size > 64 * 1024) tooLarge = true;
+    if (!tooLarge) chunks.push(chunk);
+  }
+  if (tooLarge) throw fail("请求体不能超过 64KB。", 413, "too_large");
+  let body;
+  try { body = JSON.parse(Buffer.concat(chunks).toString("utf8")); }
+  catch { throw fail("请求体不是有效 JSON。"); }
+  if (!body || typeof body !== "object" || Array.isArray(body)) throw fail("请求体必须是平面对象。");
+  const keys = Object.keys(body);
+  if (keys.some((key) => key === ".id" || isSecretKey(key) || key !== "disabled") ||
+      keys.length !== 1 || (body.disabled !== "yes" && body.disabled !== "no")) {
+    throw fail('仅允许 {disabled: "yes" | "no"}。');
+  }
+  return JSON.stringify({ disabled: body.disabled });
 }
 
 function routerErrorText(parsed) {
@@ -443,7 +470,8 @@ function metaPayload(env) {
     passwordConfigured: password.length > 0,
     wanInterfaces: parseCsv(env.WAN_INTERFACES, ["liantong", "ether0"]),
     lanInterfaces: parseCsv(env.LAN_INTERFACES, ["bridge1"]),
-    readonly: true,
+    readonly: !parseBool(env.ROS_WRITE_ENABLED) || parseBool(env.DEMO_MODE),
+    writeEnabled: parseBool(env.ROS_WRITE_ENABLED),
     tlsInsecure: parseBool(env.ROUTEROS_TLS_INSECURE),
     timeoutMs: timeoutMs(env),
     version: readVersion(),
@@ -488,6 +516,7 @@ function sendFile(res, file) {
  */
 export function createHandler(env, options = {}) {
   const demo = parseBool(env.DEMO_MODE);
+  const writeEnabled = parseBool(env.ROS_WRITE_ENABLED);
   const staticDir = options.staticDir === undefined ? path.join(ROOT, "dist") : options.staticDir;
   const request = options.request ?? routerRequest;
 
@@ -496,6 +525,15 @@ export function createHandler(env, options = {}) {
     const url = new URL(req.url || "/", "http://127.0.0.1");
     const pathname = normalizeRestPath(url.pathname);
     const started = Date.now();
+    const isWrite = !READ_METHODS.has(method) && method !== "OPTIONS";
+    let writeAllowed = false;
+    if (isWrite && url.pathname.startsWith("/rest")) {
+      // Only log the validated path, never query strings or request body values.
+      const logPath = pathname?.replace(/[\r\n\x00-\x1f\x7f]/g, "_") || "<invalid>";
+      res.once("finish", () => console.info(
+        `[ros] WRITE ${method} ${logPath} ${writeAllowed ? "allowed" : "denied"} ${res.statusCode} ${Date.now() - started}ms`,
+      ));
+    }
 
     if (!pathname) {
       sendJson(res, 400, { code: "bad_path", message: "无法识别这个路径。" });
@@ -538,7 +576,7 @@ export function createHandler(env, options = {}) {
         res.end();
         return true;
       }
-      if (!READ_METHODS.has(method)) {
+      if (isWrite && !writeEnabled) {
         res.setHeader("Allow", "GET, HEAD, OPTIONS");
         sendJson(res, 405, {
           code: "method_not_allowed",
@@ -547,7 +585,25 @@ export function createHandler(env, options = {}) {
         console.info(`[ros] ${method} ${pathname} 405 ${Date.now() - started}ms`);
         return true;
       }
-      if (!ALLOWED.has(pathname)) {
+      let writeBody;
+      if (isWrite) {
+        const writePath = /^\/rest\/(?:interface|ip\/firewall\/filter|interface\/wireguard\/peers)\/\*[0-9a-f]+$/i;
+        if (method !== "PATCH" || !writePath.test(pathname) || decodeURIComponent(url.pathname) !== pathname || url.search) {
+          sendJson(res, 403, { code: "forbidden_path", message: "写操作不允许访问这个路径或方法。" });
+          return true;
+        }
+        if (demo) {
+          sendJson(res, 503, { code: "demo_readonly", message: "演示模式不执行写操作。" }, { demo });
+          return true;
+        }
+        try {
+          writeBody = await readWriteBody(req);
+        } catch (error) {
+          sendJson(res, error.status || 400, { code: error.code || "bad_body", message: error.message });
+          return true;
+        }
+      }
+      if (!isWrite && !ALLOWED.has(pathname)) {
         sendJson(res, 403, {
           code: "forbidden_path",
           message: "只读代理不允许访问这个路径。",
@@ -605,19 +661,34 @@ export function createHandler(env, options = {}) {
 
       try {
         const token = Buffer.from(`${user}:${password}`, "utf8").toString("base64");
+        if (isWrite) writeAllowed = true;
         const upstream = await request(target, {
-          method: "GET",
+          method: isWrite ? method : "GET",
+          body: writeBody,
           timeout: timeoutMs(env),
           insecure: parseBool(env.ROUTEROS_TLS_INSECURE),
           signal: controller.signal,
           headers: {
             Authorization: `Basic ${token}`,
             Accept: "application/json",
+            ...(isWrite ? { "Content-Type": "application/json", "Content-Length": Buffer.byteLength(writeBody) } : {}),
             "Accept-Encoding": "identity",
             Host: target.host,
           },
         });
         const parsed = parseUpstream(upstream.headers, upstream.body);
+        if (isWrite) {
+          // RouterOS JSON errors retain their status and body, with secret fields removed.
+          if (parsed.kind === "json") sendJson(res, upstream.status, redactSecrets(parsed.value));
+          else if (parsed.kind === "empty") {
+            applyCommon(res);
+            res.statusCode = upstream.status;
+            res.end();
+          } else sendJson(res, upstream.status >= 400 ? upstream.status : 502, {
+            code: "bad_response", message: "路由器的响应不是 JSON。",
+          });
+          return true;
+        }
         if (upstream.status >= 400 || parsed.kind === "html") {
           const failure = describeRouterFailure(upstream.status, parsed);
           const httpStatus = failure.code === "not_found" ? 404 : upstream.status >= 400 ? upstream.status : 502;
@@ -639,7 +710,7 @@ export function createHandler(env, options = {}) {
         if (error?.code === "ABORT") return true;
         const failure = classifyNetworkError(error);
         if (!res.writableEnded) sendJson(res, failure.status, failure);
-        console.info(`[ros] GET ${pathname} ${failure.code} ${Date.now() - started}ms`);
+        if (!isWrite) console.info(`[ros] GET ${pathname} ${failure.code} ${Date.now() - started}ms`);
         return true;
       } finally {
         res.off?.("close", onClose);
