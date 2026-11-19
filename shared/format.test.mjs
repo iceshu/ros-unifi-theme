@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+  cleanRouterText,
+  displayArch,
   formatBps,
   formatBytes,
   formatLastSeen,
@@ -24,6 +26,14 @@ test("formats durations in Chinese", () => {
   assert.equal(formatUptime(""), "—");
   assert.equal(formatLastSeen("never"), "从未");
   assert.equal(formatLastSeen("1m12s"), "1 分 12 秒前");
+});
+
+test("strips RouterOS placeholder board text", () => {
+  assert.equal(cleanRouterText("x86 Default string Default string"), "x86");
+  assert.equal(cleanRouterText("Default string"), "");
+  assert.equal(cleanRouterText("  RB5009  "), "RB5009");
+  assert.equal(displayArch("x86_64"), "x86");
+  assert.equal(displayArch("arm64"), "arm64");
 });
 
 test("formats bytes and bit rates", () => {

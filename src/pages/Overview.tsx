@@ -1,188 +1,206 @@
 import { createMemo } from "solid-js";
 import { ThroughputChart } from "../components/Chart";
-import { PageHeader, Pill, RateText, Ring, Skeleton } from "../components/ui";
-import { formatBytes, formatUptime } from "../lib/format";
+import { displayArch, formatBps, formatBytes, formatUptime } from "../lib/format";
 import {
   addressesOn,
+  cleanCpu,
   defaultRoute,
   diskUsage,
   flag,
+  hardwareLabel,
   linkState,
   memoryUsage,
   num,
 } from "../lib/model";
 import { useDashboard } from "../lib/store";
 
+function rateText(bps: number | null | undefined): string {
+  const formatted = formatBps(bps ?? null);
+  if (!formatted) return "—";
+  return `${formatted.value} ${formatted.unit}`;
+}
+
 export function OverviewPage() {
   const dash = useDashboard();
-  const wan = createMemo(() => dash.interfaces().find((row) => row.name === dash.primaryWan()));
+  const wanName = () => dash.primaryWan();
+  const wan = createMemo(() => dash.interfaces().find((row) => row.name === wanName()));
+  const wanUp = createMemo(() => !!wan() && flag(wan()?.running) && !flag(wan()?.disabled));
   const rate = createMemo(() => {
-    const name = dash.primaryWan();
+    const name = wanName();
     return name ? dash.rates()[name] : undefined;
   });
   const history = createMemo(() => {
-    const name = dash.primaryWan();
+    const name = wanName();
     return name ? (dash.history()[name] ?? []) : [];
   });
-  const client = createMemo(() => dash.pppoe().find((row) => row.name === dash.primaryWan()));
+  const client = createMemo(() => dash.pppoe().find((row) => row.name === wanName()));
   const carrier = createMemo(() => {
     const parent = client()?.interface;
     if (parent) return dash.interfaces().find((row) => row.name === parent) ?? null;
-    const fallback = dash.wanNames().find((name) => name !== dash.primaryWan());
+    const fallback = dash.wanNames().find((name) => name !== wanName());
     return dash.interfaces().find((row) => row.name === fallback) ?? null;
   });
   const addresses = createMemo(() => {
-    const name = dash.primaryWan();
+    const name = wanName();
     return name ? addressesOn(dash.addresses(), name) : [];
   });
   const route = createMemo(() => defaultRoute(dash.routes()));
   const memory = createMemo(() => memoryUsage(dash.resource()));
   const disk = createMemo(() => diskUsage(dash.resource()));
   const cpu = createMemo(() => num(dash.resource()?.["cpu-load"] ?? null));
-  const span = createMemo(() => {
-    const points = history();
-    if (points.length < 2) return "等待采样";
-    const seconds = Math.round((points[points.length - 1].t - points[0].t) / 1000);
-    if (seconds < 90) return `最近 ${seconds} 秒`;
-    return `最近 ${Math.max(1, Math.round(seconds / 60))} 分钟`;
-  });
-  const offline = () => dash.ready() && dash.error() && !dash.resource() && dash.interfaces().length === 0;
+  const lanName = createMemo(
+    () => dash.lanNames().find((name) => dash.interfaces().some((row) => row.name === name)) ?? dash.lanNames()[0] ?? "",
+  );
+  const lanRate = createMemo(() => (lanName() ? dash.rates()[lanName()] : undefined));
+  const online = createMemo(() => dash.leases().filter((lease) => lease.status === "bound").length);
+  const hardware = createMemo(() => hardwareLabel(dash.resource(), dash.routerboard()));
+  const arch = createMemo(() => displayArch(dash.resource()?.["architecture-name"]));
+  const version = createMemo(() => (dash.resource()?.version || "").replace(/\s*\(.*\)\s*$/, ""));
+  const offline = () => dash.ready() && !!dash.error() && !dash.resource() && dash.interfaces().length === 0;
 
   return (
-    <div>
-      <PageHeader title="概览" description="看一眼路由器是否在线、互联网通不通，以及当前上下行。数字来自只读轮询，不会改配置。" />
+    <div class="space-y-3">
       {offline() ? (
-        <section class="card mb-4 p-6">
-          <p class="text-lg">还没有读到路由器。</p>
-          <p class="mt-2 max-w-2xl text-sm text-muted">{dash.error()?.message}</p>
-          <a href="/connection" class="chip mt-4 inline-flex">
-            打开连接说明
+        <section class="card px-4 py-3 text-sm">
+          <p>{dash.error()?.message}</p>
+          <a href="/connection" class="mt-2 inline-block text-accent">
+            连接
           </a>
         </section>
       ) : null}
-      <div class="grid gap-4 xl:grid-cols-12">
-        <section class="card p-5 md:p-6 xl:col-span-8">
-          <div class="flex flex-wrap items-start justify-between gap-4">
+
+      <section class="card px-3 py-3 md:px-4">
+        <div class="topo">
+          <div class="topo-node">
+            <i class={`led mt-1 ${wanUp() ? "led-good" : dash.ready() ? "led-bad" : "led-muted"}`} />
             <div>
-              <p class="kicker">互联网吞吐 · {dash.primaryWan() || "未识别广域网"}</p>
-              <div class="mt-4 grid gap-4 sm:grid-cols-2">
-                <div>
-                  <div class="text-sm text-muted">下载</div>
-                  {dash.ready() ? <RateText bps={rate()?.rxBps} large tone="accent" /> : <Skeleton class="mt-2 h-10 w-36" />}
-                </div>
-                <div>
-                  <div class="text-sm text-muted">上传</div>
-                  {dash.ready() ? <RateText bps={rate()?.txBps} large tone="good" /> : <Skeleton class="mt-2 h-10 w-36" />}
-                </div>
+              <div class="kicker">互联网</div>
+              <div class="mt-1 text-sm font-medium">{!dash.ready() ? "—" : wanUp() ? "已连接" : "未连接"}</div>
+            </div>
+          </div>
+          <div class="topo-line" />
+          <a href="/interfaces" class="topo-node">
+            <i class={`led mt-1 ${wanUp() ? "led-good" : "led-bad"}`} />
+            <div class="min-w-0">
+              <div class="kicker">广域网</div>
+              <div class="mt-1 truncate text-sm font-medium">{wanName() || "—"}</div>
+              <div class="mt-1 font-mono text-xs text-muted">
+                <span class="text-[#8fd4dc]">↓</span> {rateText(rate()?.rxBps)}
+                <span class="ml-2 text-[#b7e7cb]">↑</span> {rateText(rate()?.txBps)}
               </div>
             </div>
-            <p class="text-xs text-faint">{span()}</p>
+          </a>
+          <div class="topo-line" />
+          <div class="topo-node">
+            <i class={`led mt-1 ${dash.resource() ? "led-good" : "led-muted"}`} />
+            <div class="min-w-0">
+              <div class="kicker">网关</div>
+              <div class="mt-1 truncate text-sm font-medium">{dash.identity()?.name || "—"}</div>
+              <div class="mt-1 truncate text-xs text-faint">{hardware() || version() || ""}</div>
+            </div>
           </div>
-          <ThroughputChart points={history()} />
-          <p class="mt-3 text-xs text-faint">
-            下载是广域网接口收到的流量，上传是它发出的流量。PPPoE 和承载它的网口不会加在一起，避免把同一份流量算两次。
-          </p>
-        </section>
-        <section class="card p-5 xl:col-span-4">
-          <div class="flex items-center justify-between">
-            <p class="kicker">互联网</p>
-            <Pill tone={linkState(wan()).tone}>{linkState(wan()).label}</Pill>
+          <div class="topo-line" />
+          <a href="/devices" class="topo-node">
+            <i class="led led-good mt-1" />
+            <div>
+              <div class="kicker">局域网</div>
+              <div class="mt-1 text-sm font-medium">{online()} 在线</div>
+              <div class="mt-1 font-mono text-xs text-muted">
+                <span class="text-[#8fd4dc]">↓</span> {rateText(lanRate()?.rxBps)}
+                <span class="ml-2 text-[#b7e7cb]">↑</span> {rateText(lanRate()?.txBps)}
+              </div>
+            </div>
+          </a>
+        </div>
+      </section>
+
+      <section class="card px-4 py-3">
+        <div class="mb-1 flex flex-wrap items-end justify-between gap-3">
+          <div class="flex flex-wrap gap-8">
+            <div>
+              <div class="kicker">下载</div>
+              <div class="rate-xl mt-1">
+                <span class="tabular-nums">{formatBps(rate()?.rxBps ?? null)?.value ?? "—"}</span>
+                <span class="rate-unit">{formatBps(rate()?.rxBps ?? null)?.unit ?? ""}</span>
+              </div>
+            </div>
+            <div>
+              <div class="kicker">上传</div>
+              <div class="rate-xl mt-1">
+                <span class="tabular-nums">{formatBps(rate()?.txBps ?? null)?.value ?? "—"}</span>
+                <span class="rate-unit">{formatBps(rate()?.txBps ?? null)?.unit ?? ""}</span>
+              </div>
+            </div>
           </div>
-          <h2 class="mt-4 text-3xl font-semibold tracking-tight">
-            {!dash.ready() ? "读取中" : flag(wan()?.running) && !flag(wan()?.disabled) ? "已连接" : wan() ? "未连接" : "没有这个接口"}
-          </h2>
-          <p class="mt-1 font-mono text-sm text-muted">{dash.primaryWan() || "—"}{client() ? " · PPPoE" : ""}</p>
-          <dl class="mt-5 space-y-3 text-sm">
-            <Row label="地址" value={addresses().join("，") || "—"} mono />
-            {client()?.user ? <Row label="账号" value={client()?.user || ""} /> : null}
-            <Row
-              label="物理线路"
-              value={carrier() ? `${carrier()?.name} · ${linkState(carrier() ?? undefined).label}` : "—"}
-            />
-            <Row label="默认路由" value={route() ? `${route()?.gateway || "—"}` : "—"} mono />
-            <Row label="最近链路起来" value={wan()?.["last-link-up-time"] || "—"} />
-          </dl>
-        </section>
-        <Metric
-          label="CPU"
-          value={cpu() == null ? "—" : `${Math.round(cpu() ?? 0)}%`}
-          hint={dash.resource() ? `${dash.resource()?.cpu || ""} · ${dash.resource()?.["cpu-count"] || "?"} 核` : "等待 /system/resource"}
-          percent={cpu()}
-        />
-        <Metric
-          label="内存"
-          value={memory() ? `${Math.round(memory()?.percent ?? 0)}%` : "—"}
-          hint={memory() ? `${formatBytes(memory()?.used ?? 0)} / ${formatBytes(memory()?.total ?? 0)}` : "已用 / 总计"}
-          percent={memory()?.percent ?? null}
-        />
-        <section class="card p-5 xl:col-span-3">
-          <p class="kicker">温度</p>
+          <div class="text-xs text-faint">{wanName()}</div>
+        </div>
+        <ThroughputChart points={history()} now={dash.now()} />
+      </section>
+
+      <section class="grid gap-3 lg:grid-cols-5">
+        <div class="card grid gap-3 px-4 py-3 sm:grid-cols-2 lg:col-span-3 lg:grid-cols-4">
+          <Stat
+            label="CPU"
+            value={cpu() == null ? "—" : `${Math.round(cpu() ?? 0)}%`}
+            percent={cpu()}
+            hint={[cleanCpu(dash.resource()?.cpu), dash.resource()?.["cpu-count"] ? `${dash.resource()?.["cpu-count"]} 核` : ""]
+              .filter(Boolean)
+              .join(" · ")}
+          />
+          <Stat
+            label="内存"
+            value={memory() ? `${Math.round(memory()?.percent ?? 0)}%` : "—"}
+            percent={memory()?.percent ?? null}
+            hint={memory() ? `${formatBytes(memory()?.used ?? 0)} / ${formatBytes(memory()?.total ?? 0)}` : ""}
+          />
+          <Stat label="运行" value={formatUptime(dash.resource()?.uptime)} hint={version()} />
+          <Stat
+            label={hardware() && hardware() !== arch() ? "硬件" : "平台"}
+            value={hardware() || "—"}
+            hint={[dash.resource()?.platform, arch() && arch() !== hardware() ? arch() : "", disk() ? `磁盘 ${formatBytes(disk()?.used ?? 0)}` : ""]
+              .filter(Boolean)
+              .join(" · ")}
+          />
           {dash.temperature() ? (
-            <>
-              <p class="mt-3 text-3xl font-semibold tabular-nums tracking-tight">
-                {Math.round(dash.temperature()?.value ?? 0)}
-                <span class="ml-1 text-lg text-muted">{dash.temperature()?.unit}</span>
-              </p>
-              <p class="mt-2 text-sm text-muted">{dash.temperature()?.name}</p>
-            </>
-          ) : (
-            <>
-              <p class="mt-3 text-3xl font-semibold text-faint">未报告</p>
-              <p class="mt-2 text-sm text-muted">这台设备没有在 /system/health 里给出温度，页面不会编一个数字。</p>
-            </>
-          )}
-        </section>
-        <section class="card p-5 xl:col-span-3">
-          <p class="kicker">运行时间</p>
-          <p class="mt-3 text-3xl font-semibold tracking-tight">{formatUptime(dash.resource()?.uptime)}</p>
-          <p class="mt-2 text-sm text-muted">{dash.resource()?.version || "RouterOS 版本读取中"}</p>
-        </section>
-        <section class="card p-5 xl:col-span-12">
-          <div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-            <Fact label="名称" value={dash.identity()?.name || "—"} />
-            <Fact label="板卡" value={dash.resource()?.["board-name"] || dash.routerboard()?.model || "—"} />
-            <Fact
-              label="平台"
-              value={`${dash.resource()?.platform || "—"} · ${dash.resource()?.["architecture-name"] || "—"}`}
+            <Stat
+              label="温度"
+              value={`${Math.round(dash.temperature()?.value ?? 0)}${dash.temperature()?.unit || ""}`}
+              hint=""
             />
-            <Fact
-              label="磁盘"
-              value={disk() ? `${formatBytes(disk()?.used ?? 0)} / ${formatBytes(disk()?.total ?? 0)}` : "—"}
-            />
-          </div>
-        </section>
-      </div>
+          ) : null}
+        </div>
+        <div class="card grid content-center gap-2 px-4 py-3 text-sm lg:col-span-2 sm:grid-cols-2">
+          <Fact label="地址" value={addresses()[0] || "—"} />
+          {client()?.user ? <Fact label="账号" value={client()?.user || ""} /> : null}
+          <Fact label="线路" value={carrier() ? `${carrier()?.name} ${linkState(carrier() ?? undefined).label}` : "—"} />
+          <Fact label="路由" value={route()?.gateway || "—"} />
+          <Fact label="链路" value={wan()?.["last-link-up-time"] || "—"} />
+        </div>
+      </section>
     </div>
   );
 }
 
-function Row(props: { label: string; value: string; mono?: boolean }) {
+function Stat(props: { label: string; value: string; hint?: string; percent?: number | null }) {
   return (
-    <div class="flex items-start justify-between gap-4">
-      <dt class="text-muted">{props.label}</dt>
-      <dd class={props.mono ? "text-right font-mono" : "text-right"}>{props.value}</dd>
+    <div class="min-w-0">
+      <div class="kicker">{props.label}</div>
+      <div class="mt-1 truncate text-sm font-medium tabular-nums">{props.value}</div>
+      {props.percent != null ? (
+        <div class="meter mt-2">
+          <i style={{ width: `${Math.max(0, Math.min(100, props.percent))}%` }} />
+        </div>
+      ) : null}
+      {props.hint ? <div class="mt-1 truncate text-xs text-faint">{props.hint}</div> : null}
     </div>
   );
 }
 
 function Fact(props: { label: string; value: string }) {
   return (
-    <div>
-      <p class="kicker">{props.label}</p>
-      <p class="mt-1 text-sm">{props.value}</p>
+    <div class="min-w-0">
+      <div class="kicker">{props.label}</div>
+      <div class="mt-1 truncate font-mono text-xs">{props.value}</div>
     </div>
-  );
-}
-
-function Metric(props: { label: string; value: string; hint: string; percent: number | null }) {
-  return (
-    <section class="card flex items-center justify-between gap-3 p-5 xl:col-span-3">
-      <div>
-        <p class="kicker">{props.label}</p>
-        <p class="mt-3 text-3xl font-semibold tabular-nums tracking-tight">{props.value}</p>
-        <p class="mt-2 text-sm text-muted">{props.hint}</p>
-      </div>
-      <Ring percent={props.percent} />
-    </section>
   );
 }

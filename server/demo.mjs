@@ -207,38 +207,30 @@ export function demoBody(pathname, nowMs = Date.now()) {
           "build-time": "Sep/20/2024 13:00:00",
           "free-memory": String(Math.round(total * (1 - usedRatio))),
           "total-memory": String(total),
-          cpu: "ARM",
-          "cpu-count": "4",
+          cpu: "Intel(R)",
+          "cpu-count": "2",
           "cpu-frequency": "1400",
           "cpu-load": String(Math.round(Math.min(96, Math.max(4, wave(nowMs, 16, 8, 25))))),
           "free-hdd-space": String(980 * 1024 * 1024),
           "total-hdd-space": String(1024 * 1024 * 1024),
-          "architecture-name": "arm64",
-          "board-name": "RB5009UG+S+",
+          "architecture-name": "x86_64",
+          "board-name": "x86 Default string Default string",
           platform: "MikroTik",
         },
       ];
     }
     case "/rest/system/identity":
-      return [{ name: "家里" }];
+      return [{ name: "x86" }];
     case "/rest/system/clock":
       return clock(nowMs);
     case "/rest/system/health":
-      return [
-        {
-          ".id": "*1",
-          name: "cpu-temperature",
-          value: String(Math.round(wave(nowMs, 51, 2, 40))),
-          type: "C",
-        },
-        { ".id": "*2", name: "board-temperature1", value: "43", type: "C" },
-      ];
+      return [];
     case "/rest/system/routerboard":
       return [
         {
           routerboard: "true",
-          model: "RB5009UG+S+",
-          "board-name": "RB5009UG+S+",
+          model: "Default string",
+          "board-name": "Default string",
           "current-firmware": "7.16.2",
         },
       ];

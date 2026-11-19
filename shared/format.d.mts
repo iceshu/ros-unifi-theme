@@ -3,6 +3,8 @@ export function formatSeconds(total: number): string;
 export function formatUptime(raw: string | null | undefined): string;
 export function formatLastSeen(raw: string | null | undefined): string;
 export function formatBytes(value: number | string | null | undefined): string;
+export function cleanRouterText(value: string | null | undefined): string;
+export function displayArch(value: string | null | undefined): string;
 export function formatBps(
   value: number | string | null | undefined,
 ): { value: string; unit: string } | null;

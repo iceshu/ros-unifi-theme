@@ -84,6 +84,20 @@ export function formatBytes(value) {
 
 const RATE_UNITS = ["bps", "Kbps", "Mbps", "Gbps"];
 
+export function cleanRouterText(value) {
+  if (value == null) return "";
+  return String(value)
+    .replace(/default\s*string/gi, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+export function displayArch(value) {
+  const text = cleanRouterText(value);
+  if (/x86/i.test(text)) return "x86";
+  return text;
+}
+
 export function formatBps(value) {
   const n = typeof value === "number" ? value : Number(value);
   if (!Number.isFinite(n) || n < 0) return null;

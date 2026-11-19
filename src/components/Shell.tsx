@@ -87,10 +87,10 @@ export function Shell(props: ParentProps) {
             <div class="flex items-center gap-5">
               <div class="hidden text-right sm:block">
                 <div class="text-[11px] text-faint">互联网 {dash.primaryWan() || ""}</div>
-                <div class="font-mono text-sm">
-                  <span class="text-accent">↓ {formatBps(throughput()?.rxBps ?? null)?.value ?? "—"}</span>
+                <div class="font-mono text-xs text-muted">
+                  <span>↓ {formatBps(throughput()?.rxBps ?? null)?.value ?? "—"}</span>
                   <span class="ml-1 text-faint">{formatBps(throughput()?.rxBps ?? null)?.unit ?? ""}</span>
-                  <span class="ml-3 text-good">↑ {formatBps(throughput()?.txBps ?? null)?.value ?? "—"}</span>
+                  <span class="ml-3">↑ {formatBps(throughput()?.txBps ?? null)?.value ?? "—"}</span>
                   <span class="ml-1 text-faint">{formatBps(throughput()?.txBps ?? null)?.unit ?? ""}</span>
                 </div>
               </div>
@@ -106,7 +106,7 @@ export function Shell(props: ParentProps) {
         </header>
         {dash.meta()?.demo ? (
           <div class="banner banner-demo">
-            <p>演示模式。这些数字是内置样例，用来在连不上路由器时看界面，不是这台网络上的实时数据。</p>
+            <p>演示数据</p>
           </div>
         ) : null}
         {dash.error() ? (

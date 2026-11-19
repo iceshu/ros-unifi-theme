@@ -1,3 +1,5 @@
+import { cleanRouterText, displayArch } from "./format";
+
 export type RosRecord = Record<string, string>;
 export type Role = "wan" | "lan" | "other";
 export type Tone = "good" | "bad" | "warn" | "accent" | "muted";
@@ -330,4 +332,90 @@ export function diskUsage(resource: RosRecord | null): { used: number; total: nu
   if (total == null || free == null || total <= 0) return null;
   const used = Math.max(0, total - free);
   return { used, total, percent: (used / total) * 100 };
+}
+
+export function cleanCpu(value: string | undefined): string {
+  if (!value) return "";
+  return value.replace(/\(R\)|\(TM\)/gi, "").replace(/\s+/g, " ").trim();
+}
+
+export function hardwareLabel(resource: RosRecord | null, routerboard: RosRecord | null): string {
+  const model = cleanRouterText(routerboard?.model) || cleanRouterText(resource?.["board-name"]);
+  const arch = displayArch(resource?.["architecture-name"]);
+  if (model && !/^x86$/i.test(model)) return model;
+  return arch || model;
+}
+
+export type DeviceKind =
+  | "phone"
+  | "laptop"
+  | "server"
+  | "nas"
+  | "ap"
+  | "camera"
+  | "tv"
+  | "console"
+  | "speaker"
+  | "printer"
+  | "generic";
+
+const DEVICE_RULES: Array<[RegExp, DeviceKind]> = [
+  [/camera|webcam|摄像|chuangmi|imou|hikvision|ipc/i, "camera"],
+  [/nas|ds\d|synology|qnap|群晖/i, "nas"],
+  [/\bap\b|tplink|tp-link|omada|unifi|无线/i, "ap"],
+  [/ps[345]|playstation|xbox|switch/i, "console"],
+  [/电视|\btv\b|bravia/i, "tv"],
+  [/print|打印/i, "printer"],
+  [/iphone|ipad|phone|huawei|pixel|android|手机|xiaomi/i, "phone"],
+  [/genie|echo|音箱|homepod|speaker/i, "speaker"],
+  [/pve|proxmox|esxi|server|ubuntu|debian|vmware|truenas/i, "server"],
+  [/macbook|laptop|thinkpad|notebook|笔记本/i, "laptop"],
+];
+
+const OUI: Record<string, { kind: DeviceKind; vendor: string }> = {
+  "001132": { kind: "nas", vendor: "群晖" },
+  "78605b": { kind: "ap", vendor: "TP-Link" },
+  "50c7bf": { kind: "ap", vendor: "TP-Link" },
+  "14cc20": { kind: "ap", vendor: "TP-Link" },
+  "c006c3": { kind: "ap", vendor: "TP-Link" },
+  "640980": { kind: "generic", vendor: "小米" },
+  "286c07": { kind: "generic", vendor: "小米" },
+  "9c99a0": { kind: "generic", vendor: "小米" },
+  "7811dc": { kind: "generic", vendor: "小米" },
+  "34ce00": { kind: "generic", vendor: "小米" },
+  "b88880": { kind: "generic", vendor: "小米" },
+  "00e0fc": { kind: "phone", vendor: "华为" },
+  "4846fb": { kind: "phone", vendor: "华为" },
+  "04f938": { kind: "phone", vendor: "华为" },
+  "240ac4": { kind: "generic", vendor: "乐鑫" },
+  "30aea4": { kind: "generic", vendor: "乐鑫" },
+};
+
+function macOui(mac: string): { kind: DeviceKind; vendor: string } | null {
+  const hex = mac.replace(/[^0-9a-f]/gi, "").toLowerCase();
+  if (hex.length < 6) return null;
+  const first = Number.parseInt(hex.slice(0, 2), 16);
+  if (Number.isNaN(first) || (first & 0x02) === 0x02) return null;
+  return OUI[hex.slice(0, 6)] ?? null;
+}
+
+export function deviceProfile(host: string, comment: string, mac: string): { kind: DeviceKind; vendor: string } {
+  const text = `${host} ${comment}`;
+  const oui = macOui(mac);
+  for (const [pattern, kind] of DEVICE_RULES) {
+    if (pattern.test(text)) return { kind, vendor: oui?.vendor ?? "" };
+  }
+  return oui ?? { kind: "generic", vendor: "" };
+}
+
+export function leaseIdentity(lease: RosRecord): { title: string; subtitle: string; kind: DeviceKind } {
+  const host = (lease["host-name"] || "").trim();
+  const comment = (lease.comment || "").trim();
+  const profile = deviceProfile(host, comment, lease["mac-address"] || "");
+  if (host && comment && host.toLowerCase() !== comment.toLowerCase()) {
+    return { title: host, subtitle: comment, kind: profile.kind };
+  }
+  if (host) return { title: host, subtitle: profile.vendor, kind: profile.kind };
+  if (comment) return { title: comment, subtitle: profile.vendor, kind: profile.kind };
+  return { title: profile.vendor || "未知", subtitle: "", kind: profile.kind };
 }
