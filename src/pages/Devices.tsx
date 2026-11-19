@@ -119,7 +119,10 @@ export function DevicesPage() {
               <tbody>
                 <For each={arpOnly()} keyed={(row) => row[".id"] || row.address}>
                   {(row) => (
-                    <tr>
+                    <tr
+                      class="cursor-pointer"
+                      onClick={() => dash.setSelection({ type: "client", ip: row().address || "", mac: row()["mac-address"] || "" })}
+                    >
                       <td class="font-mono">{row().address}</td>
                       <td class="font-mono">{row()["mac-address"]}</td>
                       <td>{row().interface || "—"}</td>
@@ -139,9 +142,13 @@ export function DevicesPage() {
 }
 
 function LeaseRow(props: { lease: RosRecord; arp: RosRecord | undefined }) {
+  const dash = useDashboard();
   const identity = () => leaseIdentity(props.lease);
   return (
-    <tr>
+    <tr
+      class="cursor-pointer"
+      onClick={() => dash.setSelection({ type: "client", ip: props.lease.address || "", mac: props.lease["mac-address"] || "" })}
+    >
       <td>
         <div class="client">
           <DeviceIcon kind={identity().kind} />

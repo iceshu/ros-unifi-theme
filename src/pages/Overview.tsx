@@ -1,12 +1,12 @@
 import { createMemo } from "solid-js";
 import { ThroughputChart } from "../components/Chart";
+import { TopologyMap } from "../components/TopologyMap";
 import { displayArch, formatBps, formatBytes, formatUptime } from "../lib/format";
 import {
   addressesOn,
   cleanCpu,
   defaultRoute,
   diskUsage,
-  flag,
   hardwareLabel,
   linkState,
   memoryUsage,
@@ -14,17 +14,10 @@ import {
 } from "../lib/model";
 import { useDashboard } from "../lib/store";
 
-function rateText(bps: number | null | undefined): string {
-  const formatted = formatBps(bps ?? null);
-  if (!formatted) return "—";
-  return `${formatted.value} ${formatted.unit}`;
-}
-
 export function OverviewPage() {
   const dash = useDashboard();
   const wanName = () => dash.primaryWan();
   const wan = createMemo(() => dash.interfaces().find((row) => row.name === wanName()));
-  const wanUp = createMemo(() => !!wan() && flag(wan()?.running) && !flag(wan()?.disabled));
   const rate = createMemo(() => {
     const name = wanName();
     return name ? dash.rates()[name] : undefined;
@@ -48,11 +41,6 @@ export function OverviewPage() {
   const memory = createMemo(() => memoryUsage(dash.resource()));
   const disk = createMemo(() => diskUsage(dash.resource()));
   const cpu = createMemo(() => num(dash.resource()?.["cpu-load"] ?? null));
-  const lanName = createMemo(
-    () => dash.lanNames().find((name) => dash.interfaces().some((row) => row.name === name)) ?? dash.lanNames()[0] ?? "",
-  );
-  const lanRate = createMemo(() => (lanName() ? dash.rates()[lanName()] : undefined));
-  const online = createMemo(() => dash.leases().filter((lease) => lease.status === "bound").length);
   const hardware = createMemo(() => hardwareLabel(dash.resource(), dash.routerboard()));
   const arch = createMemo(() => displayArch(dash.resource()?.["architecture-name"]));
   const version = createMemo(() => (dash.resource()?.version || "").replace(/\s*\(.*\)\s*$/, ""));
@@ -69,50 +57,7 @@ export function OverviewPage() {
         </section>
       ) : null}
 
-      <section class="card px-3 py-3 md:px-4">
-        <div class="topo">
-          <div class="topo-node">
-            <i class={`led mt-1 ${wanUp() ? "led-good" : dash.ready() ? "led-bad" : "led-muted"}`} />
-            <div>
-              <div class="kicker">互联网</div>
-              <div class="mt-1 text-sm font-medium">{!dash.ready() ? "—" : wanUp() ? "已连接" : "未连接"}</div>
-            </div>
-          </div>
-          <div class="topo-line" />
-          <a href="/interfaces" class="topo-node">
-            <i class={`led mt-1 ${wanUp() ? "led-good" : "led-bad"}`} />
-            <div class="min-w-0">
-              <div class="kicker">广域网</div>
-              <div class="mt-1 truncate text-sm font-medium">{wanName() || "—"}</div>
-              <div class="mt-1 font-mono text-xs text-muted">
-                <span class="text-[#8fd4dc]">↓</span> {rateText(rate()?.rxBps)}
-                <span class="ml-2 text-[#b7e7cb]">↑</span> {rateText(rate()?.txBps)}
-              </div>
-            </div>
-          </a>
-          <div class="topo-line" />
-          <div class="topo-node">
-            <i class={`led mt-1 ${dash.resource() ? "led-good" : "led-muted"}`} />
-            <div class="min-w-0">
-              <div class="kicker">网关</div>
-              <div class="mt-1 truncate text-sm font-medium">{dash.identity()?.name || "—"}</div>
-              <div class="mt-1 truncate text-xs text-faint">{hardware() || version() || ""}</div>
-            </div>
-          </div>
-          <div class="topo-line" />
-          <a href="/devices" class="topo-node">
-            <i class="led led-good mt-1" />
-            <div>
-              <div class="kicker">局域网</div>
-              <div class="mt-1 text-sm font-medium">{online()} 在线</div>
-              <div class="mt-1 font-mono text-xs text-muted">
-                <span class="text-[#8fd4dc]">↓</span> {rateText(lanRate()?.rxBps)}
-                <span class="ml-2 text-[#b7e7cb]">↑</span> {rateText(lanRate()?.txBps)}
-              </div>
-            </div>
-          </a>
-        </div>
-      </section>
+      <TopologyMap />
 
       <section class="card px-4 py-3">
         <div class="mb-1 flex flex-wrap items-end justify-between gap-3">
