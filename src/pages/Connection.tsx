@@ -48,7 +48,7 @@ export function ConnectionPage() {
             <p class="mt-2 text-2xl font-semibold">{status()}</p>
             <p class="mt-1 text-sm text-muted">最近成功读取 {formatAgo(dash.updatedAt(), dash.now())}</p>
           </div>
-          <button type="button" class="chip" onClick={() => dash.retry()}>
+          <button type="button" class="chip button-primary" onClick={() => dash.retry()}>
             立即重试
           </button>
         </div>
@@ -69,7 +69,7 @@ export function ConnectionPage() {
         {CARDS.map((card) => {
           const on = () => code() != null && card.codes.includes(code() || "");
           return (
-            <article class={on() ? "card p-5 shadow-[inset_0_0_0_1px_rgba(255,93,115,0.45)]" : "card p-5"}>
+            <article class={on() ? "card p-5 shadow-[inset_0_0_0_1px_rgba(255,77,79,0.45)]" : "card p-5"}>
               <h2 class="font-semibold">{card.title}</h2>
               <p class="mt-2 text-sm text-muted">{card.body}</p>
             </article>
