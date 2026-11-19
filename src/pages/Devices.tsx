@@ -3,6 +3,7 @@ import { EmptyState, PageHeader, Pill } from "../components/ui";
 import { formatLastSeen } from "../lib/format";
 import { DeviceIcon } from "../components/DeviceIcon";
 import { arpStatusLabel, arpStatusTone, dhcpStatusLabel, dhcpStatusTone, ipSortKey, leaseIdentity, type RosRecord } from "../lib/model";
+import { AllFields } from "../components/ReadData";
 import { useDashboard } from "../lib/store";
 
 type Filter = "all" | "bound" | "idle" | "reachable";
@@ -139,14 +140,16 @@ export function DevicesPage() {
 }
 
 function LeaseRow(props: { lease: RosRecord; arp: RosRecord | undefined }) {
+  const [expanded, setExpanded] = createSignal(false);
   const identity = () => leaseIdentity(props.lease);
   return (
-    <tr>
+    <>
+    <tr class="cursor-pointer" onClick={() => setExpanded(!expanded())}>
       <td>
         <div class="client">
           <DeviceIcon kind={identity().kind} />
           <div class="min-w-0">
-            <div class={`client-name truncate ${identity().title === "未知" ? "text-faint" : ""}`}>{identity().title}</div>
+            <button type="button" class={`client-name truncate ${identity().title === "未知" ? "text-faint" : ""}`} aria-expanded={expanded() ? "true" : "false"} onClick={(event) => { event.stopPropagation(); setExpanded(!expanded()); }}>{expanded() ? "▾" : "▸"} {identity().title}</button>
             {identity().subtitle ? <div class="client-sub truncate">{identity().subtitle}</div> : null}
           </div>
         </div>
@@ -165,6 +168,8 @@ function LeaseRow(props: { lease: RosRecord; arp: RosRecord | undefined }) {
         {props.arp?.interface ? <div class="mt-1 text-xs text-faint">{props.arp.interface}</div> : null}
       </td>
     </tr>
+    {expanded() ? <tr><td colspan={6}><h3 class="text-xs text-faint">全部字段</h3><AllFields row={props.lease} /></td></tr> : null}
+    </>
   );
 }
 

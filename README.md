@@ -113,9 +113,14 @@ npm start
 - **概览**：名称、RouterOS 版本、运行时间、CPU、内存、温度（有就显示，没有就写未报告）、PPPoE / 广域网状态、当前下载和上传，以及轮询得到的曲线。
 - **设备**：DHCP 租约（主机名、IP、MAC、状态、最近出现），能对上的 ARP 会标在旁边。可搜索。
 - **接口**：运行或禁用、类型、收发速率和字节、错误。广域网和局域网会分开标。
-- **防火墙**：IPv4 filter 的链、动作、注释和主要匹配条件。没有开关。
+- **防火墙**：filter / mangle 标签页及 NAT 链接。没有开关。
+- **NAT**、**地址列表**：规则、地址、禁用状态及计数器。
+- **DHCP**、**DNS**：服务器、网络、地址池、DNS 配置与静态记录。
+- **邻居**、**队列**、**WiFi**：发现邻居、简单队列、WiFi 接口/配置/注册客户端；未安装 WiFi 菜单时显示空状态。
+- **日志**：最近 200 条，支持文本搜索；请求仅取 time、topics、message。
+- 接口与 DHCP 租约行可展开查看除 `.id` 外的全部返回字段；接口附带 ethernet 字段和 VLAN 表。概览在有会话时显示 PPP 会话。
 - **路由** 和 **WireGuard**：接口能干净返回时就显示。WireGuard 只看状态，私钥不会出现在页面上。
-- **连接**：服务端配置了哪台路由器、账号有没有配（不显示密码），以及 www 未开、认证失败、主机不可达这几类错误。
+- **连接**：已安装包、服务端配置了哪台路由器、账号有没有配（不显示密码），以及 www 未开、认证失败、主机不可达这几类错误。
 
 互联网吞吐取 `WAN_INTERFACES` 里的 PPPoE 接口（默认 `liantong`）。`ether0` 是拨号的物理口，速率不再加一次，否则同一份流量会算两遍。
 
@@ -123,7 +128,7 @@ npm start
 
 - 只把 GET 和 HEAD 转到路由器。POST、PUT、PATCH、DELETE 返回 405。
 - `monitor-traffic` 不使用。它要 POST，而且不带 `once` 时会一直挂到 REST 大约 60 秒超时。速率是用两次 `GET /rest/interface` 的 `rx-byte` / `tx-byte` 相减得到的，大约每 2 秒一次。系统、租约、防火墙等大约每 8 秒读一次。浏览器标签放到后台后会放慢。
-- 路径白名单就是仪表真正用到的那些：`/rest/system/resource`、`identity`、`clock`、`health`、`routerboard`，`/rest/interface` 及其 ethernet、bridge、list、pppoe-client、wireguard，以及 `/rest/ip/address`、`arp`、`dhcp-server/lease`、`firewall/filter`、`route`。
+- 路径白名单：`/rest/system/{resource,identity,clock,health,routerboard,package}`；`/rest/interface` 及其 `ethernet`、`bridge`、`bridge/port`、`list`、`list/member`、`pppoe-client`、`wireguard`、`wireguard/peers`、`vlan`、`wifi`、`wifi/configuration`、`wifi/registration-table`；`/rest/ip/{address,arp,dhcp-server,dhcp-server/lease,dhcp-server/network,pool,dns,dns/static,neighbor,firewall/filter,firewall/nat,firewall/mangle,firewall/address-list,route}`；`/rest/queue/simple`、`/rest/ppp/active`、`/rest/log`。花括号表示各独立路径。
 - 响应里的 `password`、`private-key`、`preshared-key` 等字段会删掉再交给浏览器。
 - 认证失败后会暂停大约 30 秒再试，避免触发路由器的登录限制。
 

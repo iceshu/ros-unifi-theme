@@ -197,6 +197,40 @@ function clock(nowMs) {
 
 export function demoBody(pathname, nowMs = Date.now()) {
   switch (pathname) {
+    case "/rest/ip/firewall/nat":
+      return [{ ".id": "*1", chain: "srcnat", action: "masquerade", "src-address": "192.168.2.0/24", "dst-address": "0.0.0.0/0", "to-addresses": "", comment: "LAN internet", disabled: "false", bytes: String(integratedBytes(nowMs, TRAFFIC.liantong.tx)), packets: String(Math.floor(integratedBytes(nowMs, TRAFFIC.liantong.tx) / 1200)) }];
+    case "/rest/ip/firewall/mangle":
+      return [{ ".id": "*1", chain: "prerouting", action: "mark-packet", "src-address": "192.168.2.0/24", "new-packet-mark": "lan", passthrough: "true", comment: "LAN accounting", disabled: "false", bytes: String(integratedBytes(nowMs, TRAFFIC.bridge1.rx)), packets: String(Math.floor(integratedBytes(nowMs, TRAFFIC.bridge1.rx) / 1200)) }];
+    case "/rest/ip/firewall/address-list":
+      return [{ ".id": "*1", list: "trusted", address: "192.168.2.0/24", timeout: "none-static", dynamic: "false", disabled: "false", comment: "Home LAN" }];
+    case "/rest/ip/dhcp-server":
+      return [{ ".id": "*1", name: "dhcp-lan", interface: "bridge1", "address-pool": "lan-pool", "lease-time": "1d", disabled: "false" }];
+    case "/rest/ip/dhcp-server/network":
+      return [{ ".id": "*1", address: "192.168.2.0/24", gateway: "192.168.2.1", "dns-server": "192.168.2.1", comment: "Home LAN" }];
+    case "/rest/ip/pool":
+      return [{ ".id": "*1", name: "lan-pool", ranges: "192.168.2.100-192.168.2.250", "next-pool": "none" }];
+    case "/rest/ip/dns":
+      return { servers: "1.1.1.1,9.9.9.9", "dynamic-servers": "", "cache-size": "2048", "cache-used": String(Math.round(wave(nowMs, 320, 20, 60))), "allow-remote-requests": "true", "verify-doh-cert": "true" };
+    case "/rest/ip/dns/static":
+      return [{ ".id": "*1", name: "gateway.home.arpa", address: "192.168.2.1", type: "A", disabled: "false" }];
+    case "/rest/ip/neighbor":
+      return [{ ".id": "*1", interface: "ether1", "mac-address": "02:DE:AD:BE:EF:01", address: "192.168.2.2", identity: "home-switch", platform: "MikroTik", version: "7.20.4", "interface-name": "ether1" }];
+    case "/rest/queue/simple":
+      return [{ ".id": "*1", name: "Guest", target: "192.168.30.0/24", "max-limit": "20M/100M", bytes: `${integratedBytes(nowMs, TRAFFIC.ether2.tx)}/${integratedBytes(nowMs, TRAFFIC.ether2.rx)}`, packets: "4200/18600", disabled: "false" }];
+    case "/rest/interface/vlan":
+      return [{ ".id": "*1", name: "vlan-guest", interface: "bridge1", "vlan-id": "30", mtu: "1500", running: "true", disabled: "false" }];
+    case "/rest/interface/wifi":
+      return [{ ".id": "*1", name: "wifi1", running: "true", disabled: "false", comment: "Home 5 GHz", "configuration.ssid": "Home" }];
+    case "/rest/interface/wifi/configuration":
+      return [{ ".id": "*1", name: "home-5g", ssid: "Home", country: "China", mode: "ap" }];
+    case "/rest/interface/wifi/registration-table":
+      return [{ ".id": "*1", interface: "wifi1", "mac-address": "02:CA:FE:12:34:56", "signal-strength": String(Math.round(wave(nowMs, -54, 3, 30))), "tx-rate": "866.7Mbps", "rx-rate": "780Mbps", uptime: rosUptime(nowMs) }];
+    case "/rest/ppp/active":
+      return [{ ".id": "*1", name: "home-vpn", service: "l2tp", "caller-id": "198.51.100.20", address: "192.168.90.10", uptime: rosUptime(nowMs) }];
+    case "/rest/system/package":
+      return [{ ".id": "*1", name: "routeros", version: "7.20.4", disabled: "false" }, { ".id": "*2", name: "wifi-qcom", version: "7.20.4", disabled: "false" }];
+    case "/rest/log":
+      return [{ time: new Date(nowMs - 60000).toISOString(), topics: "dhcp,info", message: "dhcp-lan assigned 192.168.2.100 to 02:CA:FE:12:34:56" }, { time: new Date(nowMs).toISOString(), topics: "system,info", message: "Demo dashboard: read-only connection active" }];
     case "/rest/system/resource": {
       const total = 1024 * 1024 * 1024;
       const usedRatio = 0.41 + 0.04 * Math.sin(nowMs / 20000);

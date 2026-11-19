@@ -1,3 +1,4 @@
+import { ReadTable } from "../components/ReadData";
 import { formatAgo } from "../lib/format";
 import { useDashboard } from "../lib/store";
 
@@ -41,6 +42,7 @@ export function ConnectionPage() {
   return (
     <div>
       <h1 class="mb-3 text-lg font-medium tracking-tight">连接</h1>
+      <ReadTable title="已安装包" rows={dash.packages()} fields={["name", "version", "disabled"]} />
       <section class="card mb-4 p-5">
         <div class="flex flex-wrap items-center justify-between gap-3">
           <div>

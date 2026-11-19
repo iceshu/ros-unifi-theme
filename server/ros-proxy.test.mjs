@@ -253,6 +253,12 @@ test("x86 missing menus are not_found instead of a surfaced router error", async
       assert.equal(wireguardBody.code, "not_found");
       assert.match(wireguardBody.detail, /wireguard/);
 
+      for (const menu of ["wifi", "wifi/configuration", "wifi/registration-table"]) {
+        const response = await fetch(`${base}/rest/interface/${menu}`);
+        assert.equal(response.status, 404);
+        assert.equal((await response.json()).code, "not_found");
+      }
+
       const rejected = await fetch(`${base}/rest/system/resource`);
       const rejectedBody = await rejected.json();
       assert.equal(rejected.status, 400);
@@ -262,6 +268,22 @@ test("x86 missing menus are not_found instead of a surfaced router error", async
       const healthBody = await health.json();
       assert.equal(health.status, 404);
       assert.equal(healthBody.code, "not_found");
+    },
+  );
+});
+
+test("log requests forward only the requested read projection", async () => {
+  let seen;
+  await withServer(
+    { ROUTEROS_HOST: "http://192.168.2.1", ROUTEROS_USER: "dashboard", ROUTEROS_PASSWORD: PASSWORD },
+    { request: async (target, options) => {
+      seen = { path: target.pathname, projection: target.searchParams.get(".proplist"), method: options.method };
+      return { status: 200, headers: { "content-type": "application/json" }, body: Buffer.from("[]") };
+    } },
+    async (port) => {
+      const response = await fetch(`http://127.0.0.1:${port}/rest/log?.proplist=time,topics,message`);
+      assert.equal(response.status, 200);
+      assert.deepEqual(seen, { path: "/rest/log", projection: "time,topics,message", method: "GET" });
     },
   );
 });
@@ -297,7 +319,13 @@ test("demo mode serves every allowlisted path and strips secrets", async () => {
       assert.equal(text.includes("demo-private-key-should-not-leak"), false, pathName);
       assert.equal(text.includes("demo-preshared-should-not-leak"), false, pathName);
       const json = JSON.parse(text);
-      assert.ok(Array.isArray(json), pathName);
+      if (pathName === "/rest/ip/dns") {
+        assert.equal(typeof json, "object", pathName);
+        assert.ok(!Array.isArray(json) && json !== null, pathName);
+        assert.equal(json["allow-remote-requests"], "true");
+      } else {
+        assert.ok(Array.isArray(json), pathName);
+      }
     }
     const meta = await fetch(`http://127.0.0.1:${port}/api/meta`);
     const body = await meta.json();

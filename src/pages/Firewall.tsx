@@ -2,10 +2,12 @@ import { createMemo, createSignal, For } from "solid-js";
 import { EmptyState, PageHeader, Pill } from "../components/ui";
 import { formatBytes } from "../lib/format";
 import { actionLabel, actionTone, chainLabel, firewallMatchers, flag, num } from "../lib/model";
+import { ReadTable } from "../components/ReadData";
 import { useDashboard } from "../lib/store";
 
 export function FirewallPage() {
   const dash = useDashboard();
+  const [tab, setTab] = createSignal("filter");
   const [chain, setChain] = createSignal("all");
   const [query, setQuery] = createSignal("");
   const chains = createMemo(() => {
@@ -27,6 +29,12 @@ export function FirewallPage() {
   return (
     <div>
       <PageHeader title="防火墙" />
+      <div class="mb-4 flex gap-2">
+        <ChainChip label="filter" on={tab() === "filter"} click={() => setTab("filter")} />
+        <a class="chip" href="/nat">NAT →</a>
+        <ChainChip label="mangle" on={tab() === "mangle"} click={() => setTab("mangle")} />
+      </div>
+      {tab() === "mangle" ? <ReadTable rows={dash.mangle()} fields={["chain", "action", "src-address", "dst-address", "new-routing-mark", "new-packet-mark", "passthrough", "comment", "disabled", "bytes", "packets"]} /> : <>
       <div class="mb-4 flex flex-wrap items-center gap-2">
         <input
           class="field"
@@ -86,6 +94,7 @@ export function FirewallPage() {
           </table>
         </div>
       )}
+      </>}
     </div>
   );
 }

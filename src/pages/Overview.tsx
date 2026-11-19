@@ -1,4 +1,5 @@
 import { createMemo } from "solid-js";
+import { ReadTable } from "../components/ReadData";
 import { ThroughputChart } from "../components/Chart";
 import { displayArch, formatBps, formatBytes, formatUptime } from "../lib/format";
 import {
@@ -177,6 +178,7 @@ export function OverviewPage() {
           <Fact label="链路" value={wan()?.["last-link-up-time"] || "—"} />
         </div>
       </section>
+      {dash.pppActive().length > 0 ? <ReadTable title="PPP 会话" rows={dash.pppActive()} fields={["name", "service", "caller-id", "address", "uptime"]} /> : null}
     </div>
   );
 }
