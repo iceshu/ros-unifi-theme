@@ -580,7 +580,8 @@ export function createHandler(env, options = {}) {
         return true;
       }
       const rawName = url.searchParams.get("name") || "";
-      if (!rawName || !/^[\w.@:+-]{1,64}$/.test(rawName)) {
+      // Only a map key on our side; RouterOS names may be non-ASCII, so reject just separators and control chars.
+      if (!rawName || rawName.length > 64 || /[\x00-\x1f\x7f/\\]/.test(rawName)) {
         sendJson(res, 400, { code: "bad_name" });
         return true;
       }
