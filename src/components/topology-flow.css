@@ -1,0 +1,21 @@
+@keyframes flow-dash {
+  from { stroke-dashoffset: 16; }
+  to { stroke-dashoffset: 0; }
+}
+.topology-flow { width: 32px; height: 12px; flex: 0 0 32px; }
+.topology-flow-wide { width: 100%; flex: auto; }
+.flow-lane { fill: none; stroke: #c8d0d9; stroke-width: 2; stroke-dasharray: 6 10; }
+.flow-lane.is-flowing { animation: flow-dash 2s linear infinite; }
+.flow-download.is-flowing { stroke: #006fff; }
+.flow-upload.is-flowing { stroke: #1fbf75; animation-direction: reverse; }
+.topology-backbone { margin: 16px 0 8px; }
+.topology-backbone p { margin-bottom: 4px; font-size: 11px; color: var(--color-muted, #667788); }
+.topology-panel { margin-top: 20px; border-top: 1px solid #c8d8e9; padding-top: 16px; }
+.topology-hops { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin: 12px 0 20px; }
+.topology-hops .topo-chip { min-width: 120px; text-align: left; }
+.topology-hops .topo-chip[aria-pressed="true"] { outline: 2px solid #006fff; outline-offset: 2px; }
+.topology-panel dd { overflow-wrap: anywhere; white-space: pre-line; }
+.topology-panel button:focus-visible, .topo-spine button:focus-visible, .topo-ports button:focus-visible { outline: 2px solid #006fff; outline-offset: 2px; }
+@media (prefers-reduced-motion: reduce) {
+  .flow-lane.is-flowing { animation: none; }
+}
