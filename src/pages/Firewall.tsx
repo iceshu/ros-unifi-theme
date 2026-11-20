@@ -1,12 +1,19 @@
-import { ArrowRight } from "@lucide/solid";
+import { ArrowDown, ArrowRight, ArrowUp, Copy, Pencil, Trash2 } from "@lucide/solid";
 import { createMemo, createSignal, For, Show } from "solid-js";
+import { FirewallRuleForm } from "../components/FirewallRuleForm";
+import { AddButton, ConfirmDialog, EnableSwitch, RowMenu } from "../components/form";
 import { ReadTable } from "../components/ReadData";
 import { createTableSort, SortHeader } from "../components/TableSort";
 import { EmptyState, PageHeader, Pill, Segmented } from "../components/ui";
-import { WriteToggle } from "../components/WriteToggle";
+import { ros } from "../lib/api";
+import { moveRule } from "../lib/firewall";
 import { formatBytes } from "../lib/format";
 import { actionLabel, actionTone, chainLabel, firewallMatchers, flag, num, type RosRecord } from "../lib/model";
+import { runWrite } from "../lib/mutate";
+import { can } from "../lib/session";
 import { useDashboard } from "../lib/store";
+
+const FILTER = "/rest/ip/firewall/filter";
 
 export function FirewallPage() {
   const dash = useDashboard();
@@ -14,6 +21,12 @@ export function FirewallPage() {
   const [tab, setTab] = createSignal<"filter" | "mangle">("filter");
   const [chain, setChain] = createSignal("all");
   const [query, setQuery] = createSignal("");
+  const [editing, setEditing] = createSignal<RosRecord | "new" | null>(null);
+  const [deleting, setDeleting] = createSignal<{ rule: RosRecord; index: number } | null>(null);
+  const move = (rule: RosRecord, direction: "up" | "down") => {
+    const op = moveRule(FILTER, dash.firewall(), rule[".id"], direction);
+    if (op) void runWrite(dash, direction === "up" ? "已上移规则" : "已下移规则", op);
+  };
   const chains = createMemo(() => {
     const seen = new Set<string>();
     for (const rule of dash.firewall()) if (rule.chain) seen.add(rule.chain);
@@ -34,7 +47,7 @@ export function FirewallPage() {
   return (
     <div>
       <PageHeader title="防火墙" subtitle={`${dash.firewall().length} 条 filter 规则 · ${dash.firewall().filter((rule) => flag(rule.disabled)).length} 条已禁用`}>
-        <div class="flex items-center gap-2">
+        <div class="flex flex-wrap items-center gap-2">
           <Segmented
             label="规则表"
             value={tab()}
@@ -47,6 +60,9 @@ export function FirewallPage() {
           <a class="chip" href="/nat">
             NAT <ArrowRight class="h-3.5 w-3.5" aria-hidden="true" />
           </a>
+          <Show when={tab() === "filter"}>
+            <AddButton label="新建规则" onClick={() => setEditing("new")} />
+          </Show>
         </div>
       </PageHeader>
       <Show
@@ -77,6 +93,7 @@ export function FirewallPage() {
                   <SortHeader column="action" state={sorting.sort()} toggle={sorting.toggle}>动作</SortHeader>
                   <SortHeader column="bytes" state={sorting.sort()} toggle={sorting.toggle}>命中流量</SortHeader>
                   <SortHeader column="packets" state={sorting.sort()} toggle={sorting.toggle}>包数</SortHeader>
+                  <th class="w-10" />
                 </tr>
               </thead>
               <tbody>
@@ -97,7 +114,16 @@ export function FirewallPage() {
                         <td class="whitespace-nowrap">
                           <Pill tone={actionTone(rule().action)}>{actionLabel(rule().action)}</Pill>
                           {flag(rule().disabled) ? <span class="ml-2 text-[11.5px] text-faint">已禁用</span> : null}
-                          <WriteToggle path="/rest/ip/firewall/filter" row={rule()} />
+                          <Show when={!flag(rule().dynamic)}>
+                            <span class="ml-2 align-middle">
+                              <EnableSwitch
+                                menu={FILTER}
+                                row={rule()}
+                                label={rule().comment || `规则 ${item().index}`}
+                                confirm={rule().chain === "input" ? "禁用 input 链规则可能影响你访问路由器本身（包括这个页面）。" : undefined}
+                              />
+                            </span>
+                          </Show>
                         </td>
                         <td class="w-48">
                           <div class="num text-[12.5px]">{formatBytes(num(rule().bytes) ?? 0)}</div>
@@ -106,6 +132,24 @@ export function FirewallPage() {
                           </div>
                         </td>
                         <td class="num text-[12.5px] text-muted">{(num(rule().packets) ?? 0).toLocaleString("zh-CN")}</td>
+                        <td>
+                          <Show when={can("write") && !flag(rule().dynamic)}>
+                            <RowMenu
+                              items={[
+                                { label: "编辑", icon: <Pencil aria-hidden="true" />, onSelect: () => setEditing(rule()) },
+                                { label: "复制为新规则", icon: <Copy aria-hidden="true" />, onSelect: () => setEditing({ ...rule(), ".id": "" }) },
+                                { label: "上移", icon: <ArrowUp aria-hidden="true" />, disabled: item().index === 0, onSelect: () => move(rule(), "up") },
+                                {
+                                  label: "下移",
+                                  icon: <ArrowDown aria-hidden="true" />,
+                                  disabled: item().index === dash.firewall().length - 1,
+                                  onSelect: () => move(rule(), "down"),
+                                },
+                                { label: "删除", icon: <Trash2 aria-hidden="true" />, danger: true, onSelect: () => setDeleting(item()) },
+                              ]}
+                            />
+                          </Show>
+                        </td>
                       </tr>
                     );
                   }}
@@ -114,6 +158,21 @@ export function FirewallPage() {
             </table>
           </section>
         </Show>
+      </Show>
+      <Show when={editing()} keyed>
+        {(current) => <FirewallRuleForm rule={current === "new" ? undefined : current} rules={dash.firewall()} onClose={() => setEditing(null)} />}
+      </Show>
+      <Show when={deleting()} keyed>
+        {(target) => (
+          <ConfirmDialog
+            title="删除防火墙规则？"
+            message={`将删除 #${target.index}“${target.rule.comment || firewallMatchers(target.rule)[0] || `${target.rule.chain} ${target.rule.action}`}”。删除 input 链的放行规则可能让你无法访问路由器。`}
+            confirmLabel="删除"
+            danger
+            onClose={() => setDeleting(null)}
+            onConfirm={() => runWrite(dash, "已删除规则", () => ros.remove(FILTER, target.rule[".id"]))}
+          />
+        )}
       </Show>
     </div>
   );

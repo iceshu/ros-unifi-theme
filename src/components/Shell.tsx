@@ -1,7 +1,9 @@
-import { Menu, Moon, PanelLeftClose, PanelLeftOpen, Search, Sun } from "@lucide/solid";
+import { LogOut, Menu, Moon, PanelLeftClose, PanelLeftOpen, Search, Sun } from "@lucide/solid";
 import { useLocation } from "@solidjs/router";
 import { createEffect, createMemo, createSignal, onSettled, Show, type ParentProps } from "solid-js";
+import { logout } from "../lib/api";
 import { formatAgo } from "../lib/format";
+import { can, session, setSession } from "../lib/session";
 import { useDashboard } from "../lib/store";
 import { theme, toggleTheme } from "../lib/theme";
 import { CommandPalette } from "./CommandPalette";
@@ -96,15 +98,34 @@ export function Shell(props: ParentProps) {
             </div>
           ))}
         </nav>
-        <div class="flex items-center gap-2 border-t border-line px-3 py-3">
-          <span class="sidebar-foot-text inline-flex min-w-0 flex-1 items-center gap-2 px-1 text-[12px] text-muted">
+        <div class="border-t border-line px-3 py-3">
+          <div class="sidebar-foot-text mb-2 flex min-w-0 items-center gap-2 px-1 text-[12px] text-muted">
             <i class={`led ${statusTone()}`} />
             <span class="truncate">{status()}</span>
-            <span class="pill pill-muted">{dash.meta()?.writeEnabled ? "可写" : "只读"}</span>
-          </span>
-          <button type="button" class="icon-btn hidden lg:inline-grid" aria-label={rail() ? "展开侧栏" : "收起侧栏"} onClick={() => setRail(!rail())}>
-            {rail() ? <PanelLeftOpen aria-hidden="true" /> : <PanelLeftClose aria-hidden="true" />}
-          </button>
+          </div>
+          <div class="foot-actions flex items-center gap-2">
+            <span class="sidebar-foot-text min-w-0 flex-1 px-1" title={session()?.policies.join(", ")}>
+              <span class="block truncate text-[13px] font-medium">{session()?.user}</span>
+              <span class="block truncate text-[11.5px] text-faint">
+                {session()?.group || "组未知"} · {can("write") ? "可修改" : "只读"}
+              </span>
+            </span>
+            <button
+              type="button"
+              class="icon-btn"
+              aria-label="退出登录"
+              title="退出登录"
+              onClick={async () => {
+                await logout().catch(() => undefined);
+                setSession(null);
+              }}
+            >
+              <LogOut aria-hidden="true" />
+            </button>
+            <button type="button" class="icon-btn hidden lg:inline-grid" aria-label={rail() ? "展开侧栏" : "收起侧栏"} onClick={() => setRail(!rail())}>
+              {rail() ? <PanelLeftOpen aria-hidden="true" /> : <PanelLeftClose aria-hidden="true" />}
+            </button>
+          </div>
         </div>
       </aside>
       <Show when={menu()}>

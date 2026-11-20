@@ -1,9 +1,12 @@
+import crypto from "node:crypto";
 import fs from "node:fs";
 import http from "node:http";
 import https from "node:https";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { demoBody } from "./demo.mjs";
+import { COOKIE, createLoginLimiter, createSessions, parseCookies, parsePolicies, sessionCookie, sessionTtlMs } from "./auth.mjs";
+import { demoBody, demoWrite } from "./demo.mjs";
+import { WRITE_MENUS, validateWrite } from "./writes.mjs";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -26,6 +29,10 @@ export const ALLOWED_PATHS = [
   "/rest/interface/wifi",
   "/rest/interface/wifi/configuration",
   "/rest/interface/wifi/registration-table",
+  "/rest/interface/wifi/security",
+  "/rest/interface/wireless",
+  "/rest/interface/wireless/registration-table",
+  "/rest/interface/wireless/security-profiles",
   "/rest/interface/wireguard",
   "/rest/interface/wireguard/peers",
   "/rest/ip/address",
@@ -158,7 +165,8 @@ export function normalizeRestPath(pathname) {
 }
 
 function isSecretKey(key) {
-  const name = key.toLowerCase();
+  // Dotted inline keys such as "security.passphrase" count as secrets too.
+  const name = key.toLowerCase().split(".").pop() || "";
   if (name === "public-key") return false;
   return (
     name === "password" ||
@@ -169,7 +177,8 @@ function isSecretKey(key) {
     name.endsWith("-password") ||
     name.endsWith("-passphrase") ||
     name.endsWith("-private-key") ||
-    name.endsWith("-preshared-key")
+    name.endsWith("-preshared-key") ||
+    name.endsWith("pre-shared-key")
   );
 }
 
@@ -378,31 +387,28 @@ export function routerRequest(target, { method, headers, timeout, insecure, sign
   });
 }
 
-async function readWriteBody(req) {
+/** Size-limited JSON body; oversized requests are drained so the error response still arrives. */
+async function readJsonBody(req) {
   const fail = (message, status = 400, code = "bad_body") => Object.assign(new Error(message), { status, code });
   if (!/^application\/json(?:\s*;|\s*$)/i.test(String(req.headers["content-type"] || ""))) {
-    throw fail("写操作必须使用 application/json。", 415, "content_type");
+    throw fail("请求必须使用 application/json。", 415, "content_type");
   }
   const chunks = [];
   let size = 0;
   let tooLarge = Number(req.headers["content-length"]) > 64 * 1024;
-  // Drain oversized requests without buffering them, preserving a usable HTTP error response.
   for await (const chunk of req) {
     size += chunk.length;
     if (size > 64 * 1024) tooLarge = true;
     if (!tooLarge) chunks.push(chunk);
   }
   if (tooLarge) throw fail("请求体不能超过 64KB。", 413, "too_large");
-  let body;
-  try { body = JSON.parse(Buffer.concat(chunks).toString("utf8")); }
-  catch { throw fail("请求体不是有效 JSON。"); }
-  if (!body || typeof body !== "object" || Array.isArray(body)) throw fail("请求体必须是平面对象。");
-  const keys = Object.keys(body);
-  if (keys.some((key) => key === ".id" || isSecretKey(key) || key !== "disabled") ||
-      keys.length !== 1 || (body.disabled !== "yes" && body.disabled !== "no")) {
-    throw fail('仅允许 {disabled: "yes" | "no"}。');
+  const text = Buffer.concat(chunks).toString("utf8").trim();
+  if (!text) return {};
+  try {
+    return JSON.parse(text);
+  } catch {
+    throw fail("请求体不是有效 JSON。");
   }
-  return JSON.stringify({ disabled: body.disabled });
 }
 
 function routerErrorText(parsed) {
@@ -418,9 +424,11 @@ function describeRouterFailure(status, parsed) {
   if (status === 401) {
     return {
       code: "auth",
-      message:
-        "认证失败。请检查 .env 里的 ROUTEROS_USER 和 ROUTEROS_PASSWORD，并确认该用户具备 read 与 rest-api 权限。",
+      message: "路由器拒绝了这个账号。可能密码已修改，或该账号的组缺少 api / rest-api 权限。请重新登录。",
     };
+  }
+  if (/not enough permissions|not allowed/i.test(routerErrorText(parsed))) {
+    return { code: "forbidden", message: "当前登录的 RouterOS 账号没有执行这个操作的权限。", detail };
   }
   if (parsed?.kind === "html") {
     return {
@@ -454,7 +462,7 @@ function parseUpstream(headers, body) {
   }
 }
 
-function metaPayload(env) {
+function metaPayload(env, options) {
   let host = "http://192.168.2.1";
   let hostError = null;
   try {
@@ -462,22 +470,19 @@ function metaPayload(env) {
   } catch (error) {
     hostError = error.code || "bad_host";
   }
-  const user = String(env.ROUTEROS_USER ?? "").trim();
-  const password = String(env.ROUTEROS_PASSWORD ?? "");
   return {
     demo: parseBool(env.DEMO_MODE),
     host,
     hostError,
-    user,
-    passwordConfigured: password.length > 0,
+    serviceAccount: String(env.ROUTEROS_USER ?? "").trim() !== "" && String(env.ROUTEROS_PASSWORD ?? "") !== "",
     wanInterfaces: parseCsv(env.WAN_INTERFACES, ["liantong", "ether0"]),
     lanInterfaces: parseCsv(env.LAN_INTERFACES, ["bridge1"]),
-    readonly: !parseBool(env.ROS_WRITE_ENABLED) || parseBool(env.DEMO_MODE),
-    writeEnabled: parseBool(env.ROS_WRITE_ENABLED),
     tlsInsecure: parseBool(env.ROUTEROS_TLS_INSECURE),
     timeoutMs: timeoutMs(env),
     version: readVersion(),
     allowedPaths: ALLOWED_PATHS,
+    writeMenus: Object.keys(WRITE_MENUS),
+    historyEnabled: !!options.history,
   };
 }
 
@@ -512,69 +517,350 @@ function sendFile(res, file) {
   res.end(data);
 }
 
+const DEMO_POLICIES = ["read", "write", "reboot", "test", "api", "rest-api", "sensitive", "password"];
+
+function base64(base64url) {
+  return Buffer.from(base64url, "base64url").toString("base64");
+}
+
+/** X25519 key pair in WireGuard's base64 encoding, for new peers (browsers on plain-HTTP LANs lack WebCrypto). */
+export function wireguardKeypair() {
+  const { privateKey, publicKey } = crypto.generateKeyPairSync("x25519");
+  return {
+    privateKey: base64(privateKey.export({ format: "jwk" }).d),
+    publicKey: base64(publicKey.export({ format: "jwk" }).x),
+  };
+}
+
+function sessionPayload(session, demo) {
+  return {
+    user: session.user,
+    group: session.group,
+    policies: session.policies,
+    policiesKnown: session.policiesKnown,
+    demo,
+  };
+}
+
 /**
  * @param {Record<string, string | undefined>} env
- * @param {{ staticDir?: string | false, request?: typeof routerRequest }} [options]
+ * @param {{ staticDir?: string | false, request?: typeof routerRequest, history?: { query: (name: string, range: number) => unknown }, sessions?: ReturnType<typeof createSessions>, now?: () => number }} [options]
  */
 export function createHandler(env, options = {}) {
   const demo = parseBool(env.DEMO_MODE);
-  const writeEnabled = parseBool(env.ROS_WRITE_ENABLED);
   const staticDir = options.staticDir === undefined ? path.join(ROOT, "dist") : options.staticDir;
   const request = options.request ?? routerRequest;
+  const sessions = options.sessions ?? createSessions({ ttlMs: sessionTtlMs(env), now: options.now });
+  const limiter = createLoginLimiter({ now: options.now });
+
+  const authHeader = (user, password) => `Basic ${Buffer.from(`${user}:${password}`, "utf8").toString("base64")}`;
+  const routerGet = (origin, pathWithQuery, user, password) =>
+    request(new URL(pathWithQuery, origin), {
+      method: "GET",
+      timeout: timeoutMs(env),
+      insecure: parseBool(env.ROUTEROS_TLS_INSECURE),
+      signal: null,
+      headers: {
+        Authorization: authHeader(user, password),
+        Accept: "application/json",
+        "Accept-Encoding": "identity",
+        Host: new URL(origin).host,
+      },
+    });
+
+  /** Group and policies of the account itself; unknown when the account cannot read /user. */
+  async function discoverPolicies(origin, user, password) {
+    try {
+      const users = parseUpstream({}, (await routerGet(origin, `/rest/user?name=${encodeURIComponent(user)}`, user, password)).body);
+      const group = users.kind === "json" && Array.isArray(users.value) ? String(users.value[0]?.group || "") : "";
+      if (!group) return { group: "", policies: [], policiesKnown: false };
+      const groups = parseUpstream({}, (await routerGet(origin, `/rest/user/group?name=${encodeURIComponent(group)}`, user, password)).body);
+      const policy = groups.kind === "json" && Array.isArray(groups.value) ? groups.value[0]?.policy : undefined;
+      if (typeof policy !== "string") return { group, policies: [], policiesKnown: false };
+      return { group, policies: parsePolicies(policy), policiesKnown: true };
+    } catch {
+      return { group: "", policies: [], policiesKnown: false };
+    }
+  }
+
+  async function handleLogin(req, res) {
+    const client = String(req.socket?.remoteAddress || "unknown");
+    const wait = limiter.blocked(client);
+    if (wait > 0) {
+      sendJson(res, 429, { code: "too_many_attempts", message: `登录失败次数过多，请 ${wait} 秒后再试。` });
+      return;
+    }
+    let body;
+    try {
+      body = await readJsonBody(req);
+    } catch (error) {
+      sendJson(res, error.status || 400, { code: error.code || "bad_body", message: error.message });
+      return;
+    }
+    const user = typeof body?.username === "string" ? body.username.trim() : "";
+    const password = typeof body?.password === "string" ? body.password : "";
+    if (!user || !password || user.length > 128 || password.length > 256) {
+      sendJson(res, 400, { code: "bad_login", message: "请输入 RouterOS 用户名和密码。" });
+      return;
+    }
+    const logUser = user.replace(/[^\w.@-]/g, "_");
+
+    let info;
+    if (demo) {
+      info = { user, password: "", group: "full（演示）", policies: DEMO_POLICIES, policiesKnown: true };
+    } else {
+      let origin;
+      try {
+        origin = normalizeRouterHost(env.ROUTEROS_HOST);
+      } catch {
+        sendJson(res, 500, { code: "bad_host", message: "ROUTEROS_HOST 不是有效的 http 或 https 地址。" });
+        return;
+      }
+      let upstream;
+      try {
+        upstream = await routerGet(origin, "/rest/system/identity", user, password);
+      } catch (error) {
+        const failure = classifyNetworkError(error);
+        sendJson(res, failure.status, failure);
+        return;
+      }
+      if (upstream.status === 401) {
+        limiter.fail(client);
+        console.info(`[ros] login failed for ${logUser}`);
+        sendJson(res, 401, { code: "bad_login", message: "用户名或密码错误，或该账号的组缺少 api / rest-api 权限。" });
+        return;
+      }
+      const parsed = parseUpstream(upstream.headers, upstream.body);
+      if (upstream.status >= 400 || parsed.kind !== "json") {
+        sendJson(res, upstream.status >= 400 ? upstream.status : 502, describeRouterFailure(upstream.status, parsed));
+        return;
+      }
+      info = { user, password, ...(await discoverPolicies(origin, user, password)) };
+    }
+    limiter.reset(client);
+    const id = sessions.create(info);
+    res.setHeader("Set-Cookie", sessionCookie(id, sessions.ttlMs / 1000));
+    console.info(`[ros] login ${logUser} group=${info.group || "?"}`);
+    sendJson(res, 200, sessionPayload(sessions.get(id), demo), { demo });
+  }
+
+  async function proxyRest(req, res, { method, url, pathname, session, started }) {
+    if (method === "OPTIONS") {
+      applyCommon(res);
+      res.statusCode = 204;
+      res.setHeader("Allow", "GET, HEAD, PUT, PATCH, DELETE, POST, OPTIONS");
+      res.end();
+      return;
+    }
+    const isWrite = !READ_METHODS.has(method);
+    let write;
+    if (isWrite) {
+      if (url.search) {
+        sendJson(res, 403, { code: "forbidden_path", message: "写操作不接受查询参数。" });
+        return;
+      }
+      let body;
+      if (method !== "DELETE") {
+        try {
+          body = await readJsonBody(req);
+        } catch (error) {
+          sendJson(res, error.status || 400, { code: error.code || "bad_body", message: error.message });
+          return;
+        }
+      }
+      write = validateWrite(method, pathname, body);
+      if (!write.ok) {
+        sendJson(res, write.status, { code: write.code, message: write.message });
+        console.info(`[ros] WRITE ${session.user} ${method} ${pathname} denied ${write.status}`);
+        return;
+      }
+      if (session.policiesKnown && !session.policies.includes(write.policy)) {
+        sendJson(res, 403, { code: "forbidden", message: `当前登录的 RouterOS 账号没有 ${write.policy} 权限。` });
+        console.info(`[ros] WRITE ${session.user} ${method} ${pathname} denied 403 policy`);
+        return;
+      }
+    } else if (!ALLOWED.has(pathname)) {
+      sendJson(res, 403, { code: "forbidden_path", message: "代理不允许读取这个路径。" });
+      return;
+    }
+    const search = isWrite ? "" : sanitizeSearch(url.search);
+    if (search == null) {
+      sendJson(res, 400, { code: "bad_query", message: "查询参数不在允许范围内。" });
+      return;
+    }
+
+    if (demo) {
+      if (isWrite) {
+        const result = demoWrite(method, pathname, write.body ? JSON.parse(write.body) : {}, Date.now());
+        console.info(`[ros] WRITE ${session.user} ${method} ${pathname} demo ${result.status}`);
+        sendJson(res, result.status, redactSecrets(result.body ?? {}), { demo: true });
+        return;
+      }
+      const body = demoBody(pathname, Date.now());
+      if (body == null) sendJson(res, 404, { code: "not_found", message: "演示数据里没有这个路径。" }, { demo: true });
+      else sendJson(res, 200, redactSecrets(body), { demo: true });
+      return;
+    }
+
+    let origin;
+    try {
+      origin = normalizeRouterHost(env.ROUTEROS_HOST);
+    } catch (error) {
+      const code = error.code === "creds_in_host" ? "creds_in_host" : "bad_host";
+      sendJson(res, 500, {
+        code,
+        message: code === "creds_in_host" ? "ROUTEROS_HOST 不能包含用户名或密码。" : "ROUTEROS_HOST 不是有效的 http 或 https 地址。",
+      });
+      return;
+    }
+
+    const target = new URL(pathname + search, origin);
+    const controller = new AbortController();
+    const onClose = () => {
+      if (!res.writableEnded) controller.abort();
+    };
+    // Reads are abandoned when the tab goes away; writes always run to completion.
+    if (!isWrite) res.on("close", onClose);
+    try {
+      const upstream = await request(target, {
+        method: isWrite ? method : "GET",
+        body: write?.body,
+        timeout: isWrite ? Math.max(timeoutMs(env), 15_000) : timeoutMs(env),
+        insecure: parseBool(env.ROUTEROS_TLS_INSECURE),
+        signal: isWrite ? null : controller.signal,
+        headers: {
+          Authorization: authHeader(session.user, session.password),
+          Accept: "application/json",
+          ...(write?.body !== undefined ? { "Content-Type": "application/json", "Content-Length": Buffer.byteLength(write.body) } : {}),
+          "Accept-Encoding": "identity",
+          Host: target.host,
+        },
+      });
+      const parsed = parseUpstream(upstream.headers, upstream.body);
+      if (upstream.status === 401) {
+        // Password changed or account disabled on the router: end the dashboard session as well.
+        sessions.destroy(session.id);
+        res.setHeader("Set-Cookie", sessionCookie("", 0));
+        sendJson(res, 401, { code: "login_required", message: "路由器拒绝了这个账号，请重新登录。" });
+        return;
+      }
+      if (isWrite) {
+        console.info(`[ros] WRITE ${session.user} ${method} ${pathname} ${upstream.status} ${Date.now() - started}ms`);
+        if (upstream.status >= 400) {
+          const failure = describeRouterFailure(upstream.status, parsed);
+          sendJson(res, upstream.status, failure.code === "not_found" ? { ...failure, message: "路由器上找不到这条记录，可能已被删除。" } : failure);
+        } else if (parsed.kind === "json") sendJson(res, upstream.status, redactSecrets(parsed.value));
+        else sendJson(res, upstream.status === 204 ? 200 : upstream.status, {});
+        return;
+      }
+      if (upstream.status >= 400 || parsed.kind === "html") {
+        const failure = describeRouterFailure(upstream.status, parsed);
+        sendJson(res, failure.code === "not_found" ? 404 : upstream.status >= 400 ? upstream.status : 502, failure);
+        return;
+      }
+      if (parsed.kind !== "json") {
+        sendJson(res, 502, { code: "bad_response", message: "路由器的响应不是 JSON。" });
+        return;
+      }
+      sendJson(res, 200, redactSecrets(parsed.value));
+    } catch (error) {
+      if (error?.code === "ABORT") return;
+      const failure = classifyNetworkError(error);
+      if (!res.writableEnded) sendJson(res, failure.status, failure);
+      if (isWrite) console.info(`[ros] WRITE ${session.user} ${method} ${pathname} ${failure.code}`);
+    } finally {
+      res.off?.("close", onClose);
+    }
+  }
+
+  function sendIndexOrFile(res, method, pathname) {
+    const file = safeFile(staticDir, pathname === "/" ? "/index.html" : pathname);
+    const target =
+      file && fs.existsSync(file) && fs.statSync(file).isFile()
+        ? file
+        : !path.extname(pathname) && fs.existsSync(path.join(staticDir, "index.html"))
+          ? path.join(staticDir, "index.html")
+          : null;
+    if (!target) {
+      sendJson(res, 404, { code: "not_found", message: "没有这个页面。" });
+      return;
+    }
+    if (method === "HEAD") {
+      applyCommon(res);
+      res.statusCode = 200;
+      res.end();
+      return;
+    }
+    sendFile(res, target);
+  }
 
   return async function handle(req, res) {
     const method = (req.method || "GET").toUpperCase();
     const url = new URL(req.url || "/", "http://127.0.0.1");
     const pathname = normalizeRestPath(url.pathname);
     const started = Date.now();
-    const isWrite = !READ_METHODS.has(method) && method !== "OPTIONS";
-    let writeAllowed = false;
-    if (isWrite && url.pathname.startsWith("/rest")) {
-      // Only log the validated path, never query strings or request body values.
-      const logPath = pathname?.replace(/[\r\n\x00-\x1f\x7f]/g, "_") || "<invalid>";
-      res.once("finish", () => console.info(
-        `[ros] WRITE ${method} ${logPath} ${writeAllowed ? "allowed" : "denied"} ${res.statusCode} ${Date.now() - started}ms`,
-      ));
-    }
+    const onlyMethod = (allowed) => {
+      if (allowed.includes(method)) return true;
+      sendJson(res, 405, { code: "method_not_allowed", message: `只接受 ${allowed[0]}。` });
+      return false;
+    };
 
     if (!pathname) {
       sendJson(res, 400, { code: "bad_path", message: "无法识别这个路径。" });
       return true;
     }
-
     if (pathname === "/api/health") {
-      if (method !== "GET" && method !== "HEAD") {
-        sendJson(res, 405, { code: "method_not_allowed", message: "只接受 GET。" });
-        return true;
-      }
-      sendJson(res, 200, { ok: true, readonly: true });
+      if (onlyMethod(["GET", "HEAD"])) sendJson(res, 200, { ok: true });
+      return true;
+    }
+
+    const isApi = pathname.startsWith("/api/") || pathname.startsWith("/rest");
+    if (!isApi) {
+      if (!staticDir) return false;
+      if (onlyMethod(["GET", "HEAD"])) sendIndexOrFile(res, method, pathname);
+      return true;
+    }
+
+    const site = crossSiteError(req.headers);
+    if (site) {
+      sendJson(res, 403, { code: site, message: "已拒绝跨站请求。请从仪表自己的页面访问。" });
       return true;
     }
 
     if (pathname === "/api/meta") {
-      if (method !== "GET" && method !== "HEAD") {
-        sendJson(res, 405, { code: "method_not_allowed", message: "只接受 GET。" });
-        return true;
+      if (onlyMethod(["GET", "HEAD"])) sendJson(res, 200, metaPayload(env, options), { demo });
+      return true;
+    }
+    if (pathname === "/api/login") {
+      if (onlyMethod(["POST"])) await handleLogin(req, res);
+      return true;
+    }
+    if (pathname === "/api/logout") {
+      if (onlyMethod(["POST"])) {
+        sessions.destroy(parseCookies(req.headers.cookie)[COOKIE]);
+        res.setHeader("Set-Cookie", sessionCookie("", 0));
+        sendJson(res, 200, { ok: true });
       }
-      const site = crossSiteError(req.headers);
-      if (site) {
-        sendJson(res, 403, { code: site, message: "已拒绝跨站请求。请从仪表自己的页面访问。" });
-        return true;
-      }
-      sendJson(res, 200, { ...metaPayload(env), historyEnabled: !!options.history }, { demo });
       return true;
     }
 
+    // Everything below acts with the logged-in RouterOS account.
+    const session = sessions.get(parseCookies(req.headers.cookie)[COOKIE]);
+    if (!session) {
+      sendJson(res, 401, { code: "login_required", message: "请先用 RouterOS 账号登录。" }, { demo });
+      return true;
+    }
+
+    if (pathname === "/api/session") {
+      if (onlyMethod(["GET", "HEAD"])) sendJson(res, 200, sessionPayload(session, demo), { demo });
+      return true;
+    }
+    if (pathname === "/api/wireguard/keypair") {
+      if (onlyMethod(["POST"])) sendJson(res, 200, wireguardKeypair());
+      return true;
+    }
     if (pathname === "/api/history") {
-      if (method !== "GET" && method !== "HEAD") {
-        sendJson(res, 405, { code: "method_not_allowed", message: "只接受 GET。" });
-        return true;
-      }
-      const site = crossSiteError(req.headers);
-      if (site) {
-        sendJson(res, 403, { code: site, message: "已拒绝跨站请求。请从仪表自己的页面访问。" });
-        return true;
-      }
+      if (!onlyMethod(["GET", "HEAD"])) return true;
       if (!options.history) {
         sendJson(res, 404, { code: "history_disabled", message: "历史记录功能未启用。设置 HISTORY_ENABLED=true 重启后生效。" });
         return true;
@@ -586,205 +872,14 @@ export function createHandler(env, options = {}) {
         return true;
       }
       const rawRange = url.searchParams.get("range");
-      const rangeSec = rawRange != null ? Number(rawRange) : 300;
-      sendJson(res, 200, options.history.query(rawName, rangeSec), { demo });
+      sendJson(res, 200, options.history.query(rawName, rawRange != null ? Number(rawRange) : 300), { demo });
       return true;
     }
-
-
     if (pathname.startsWith("/rest")) {
-      const site = crossSiteError(req.headers);
-      if (site) {
-        sendJson(res, 403, { code: site, message: "已拒绝跨站请求。请从仪表自己的页面访问。" });
-        return true;
-      }
-      if (method === "OPTIONS") {
-        applyCommon(res);
-        res.statusCode = 204;
-        res.setHeader("Allow", "GET, HEAD, OPTIONS");
-        res.end();
-        return true;
-      }
-      if (isWrite && !writeEnabled) {
-        res.setHeader("Allow", "GET, HEAD, OPTIONS");
-        sendJson(res, 405, {
-          code: "method_not_allowed",
-          message: "只读代理拒绝了这个请求。仪表不会向路由器发送 POST、PUT、PATCH 或 DELETE。",
-        });
-        console.info(`[ros] ${method} ${pathname} 405 ${Date.now() - started}ms`);
-        return true;
-      }
-      let writeBody;
-      if (isWrite) {
-        const writePath = /^\/rest\/(?:interface|ip\/firewall\/filter|interface\/wireguard\/peers)\/\*[0-9a-f]+$/i;
-        if (method !== "PATCH" || !writePath.test(pathname) || decodeURIComponent(url.pathname) !== pathname || url.search) {
-          sendJson(res, 403, { code: "forbidden_path", message: "写操作不允许访问这个路径或方法。" });
-          return true;
-        }
-        if (demo) {
-          sendJson(res, 503, { code: "demo_readonly", message: "演示模式不执行写操作。" }, { demo });
-          return true;
-        }
-        try {
-          writeBody = await readWriteBody(req);
-        } catch (error) {
-          sendJson(res, error.status || 400, { code: error.code || "bad_body", message: error.message });
-          return true;
-        }
-      }
-      if (!isWrite && !ALLOWED.has(pathname)) {
-        sendJson(res, 403, {
-          code: "forbidden_path",
-          message: "只读代理不允许访问这个路径。",
-        });
-        console.info(`[ros] ${method} ${pathname} 403 ${Date.now() - started}ms`);
-        return true;
-      }
-      const search = sanitizeSearch(url.search);
-      if (search == null) {
-        sendJson(res, 400, { code: "bad_query", message: "查询参数不在允许范围内。" });
-        return true;
-      }
-
-      if (demo) {
-        const body = demoBody(pathname, Date.now());
-        if (body == null) {
-          sendJson(res, 404, { code: "not_found", message: "演示数据里没有这个路径。" }, { demo: true });
-          return true;
-        }
-        sendJson(res, 200, redactSecrets(body), { demo: true });
-        return true;
-      }
-
-      let origin;
-      try {
-        origin = normalizeRouterHost(env.ROUTEROS_HOST);
-      } catch (error) {
-        const code = error.code === "creds_in_host" ? "creds_in_host" : "bad_host";
-        sendJson(res, 500, {
-          code,
-          message:
-            code === "creds_in_host"
-              ? "ROUTEROS_HOST 不能包含用户名或密码。请把账号放在 ROUTEROS_USER 和 ROUTEROS_PASSWORD。"
-              : "ROUTEROS_HOST 不是有效的 http 或 https 地址。",
-        });
-        return true;
-      }
-
-      const user = String(env.ROUTEROS_USER ?? "").trim();
-      const password = String(env.ROUTEROS_PASSWORD ?? "");
-      if (!user || !password) {
-        sendJson(res, 503, {
-          code: "not_configured",
-          message: "尚未配置 ROUTEROS_USER 或 ROUTEROS_PASSWORD。复制 .env.example 为 .env 后填写，再重启仪表。",
-        });
-        return true;
-      }
-
-      const target = new URL(pathname + search, origin);
-      const controller = new AbortController();
-      const onClose = () => {
-        if (!res.writableEnded) controller.abort();
-      };
-      res.on("close", onClose);
-
-      try {
-        const token = Buffer.from(`${user}:${password}`, "utf8").toString("base64");
-        if (isWrite) writeAllowed = true;
-        const upstream = await request(target, {
-          method: isWrite ? method : "GET",
-          body: writeBody,
-          timeout: timeoutMs(env),
-          insecure: parseBool(env.ROUTEROS_TLS_INSECURE),
-          signal: controller.signal,
-          headers: {
-            Authorization: `Basic ${token}`,
-            Accept: "application/json",
-            ...(isWrite ? { "Content-Type": "application/json", "Content-Length": Buffer.byteLength(writeBody) } : {}),
-            "Accept-Encoding": "identity",
-            Host: target.host,
-          },
-        });
-        const parsed = parseUpstream(upstream.headers, upstream.body);
-        if (isWrite) {
-          // RouterOS JSON errors retain their status and body, with secret fields removed.
-          if (parsed.kind === "json") sendJson(res, upstream.status, redactSecrets(parsed.value));
-          else if (parsed.kind === "empty") {
-            applyCommon(res);
-            res.statusCode = upstream.status;
-            res.end();
-          } else sendJson(res, upstream.status >= 400 ? upstream.status : 502, {
-            code: "bad_response", message: "路由器的响应不是 JSON。",
-          });
-          return true;
-        }
-        if (upstream.status >= 400 || parsed.kind === "html") {
-          const failure = describeRouterFailure(upstream.status, parsed);
-          const httpStatus = failure.code === "not_found" ? 404 : upstream.status >= 400 ? upstream.status : 502;
-          sendJson(res, httpStatus, failure);
-          console.info(`[ros] GET ${pathname} ${httpStatus} ${Date.now() - started}ms`);
-          return true;
-        }
-        if (parsed.kind !== "json") {
-          sendJson(res, 502, {
-            code: "bad_response",
-            message: "路由器的响应不是 JSON。",
-          });
-          return true;
-        }
-        sendJson(res, 200, redactSecrets(parsed.value));
-        console.info(`[ros] GET ${pathname} 200 ${Date.now() - started}ms`);
-        return true;
-      } catch (error) {
-        if (error?.code === "ABORT") return true;
-        const failure = classifyNetworkError(error);
-        if (!res.writableEnded) sendJson(res, failure.status, failure);
-        if (!isWrite) console.info(`[ros] GET ${pathname} ${failure.code} ${Date.now() - started}ms`);
-        return true;
-      } finally {
-        res.off?.("close", onClose);
-      }
-    }
-
-    if (pathname.startsWith("/api/")) {
-      sendJson(res, 404, { code: "not_found", message: "没有这个接口。" });
+      await proxyRest(req, res, { method, url, pathname, session, started });
       return true;
     }
-
-    if (!staticDir) return false;
-    if (method !== "GET" && method !== "HEAD") {
-      sendJson(res, 405, { code: "method_not_allowed", message: "只接受 GET。" });
-      return true;
-    }
-    const file = safeFile(staticDir, pathname === "/" ? "/index.html" : pathname);
-    if (file && fs.existsSync(file) && fs.statSync(file).isFile()) {
-      if (method === "HEAD") {
-        applyCommon(res);
-        res.statusCode = 200;
-        res.end();
-        return true;
-      }
-      sendFile(res, file);
-      return true;
-    }
-    const ext = path.extname(pathname);
-    if (!ext && staticDir) {
-      const index = path.join(staticDir, "index.html");
-      if (fs.existsSync(index)) {
-        if (method === "HEAD") {
-          applyCommon(res);
-          res.statusCode = 200;
-          res.end();
-          return true;
-        }
-        sendFile(res, index);
-        return true;
-      }
-    }
-    if (staticDir) {
-      sendJson(res, 404, { code: "not_found", message: "没有这个页面。" });
-      return true;
-    }
-    return false;
+    sendJson(res, 404, { code: "not_found", message: "没有这个接口。" });
+    return true;
   };
 }

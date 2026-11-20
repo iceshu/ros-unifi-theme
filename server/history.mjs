@@ -49,8 +49,17 @@ class RingBuffer {
   clear() { this._head = 0; this._size = 0; }
 }
 
+/** ROUTEROS_USER / ROUTEROS_PASSWORD from .env, or null when not configured. */
+export function envCredentials(env) {
+  const user = String(env.ROUTEROS_USER ?? "").trim();
+  const password = String(env.ROUTEROS_PASSWORD ?? "");
+  return user && password ? { user, password } : null;
+}
+
 export function createHistory(env, {
   request = routerRequest,
+  // Service account from .env by default; the server passes a provider that falls back to a logged-in session.
+  credentials = () => envCredentials(env),
   now = Date.now,
   setTimer = setTimeout,
   clearTimer = clearTimeout,
@@ -153,9 +162,9 @@ export function createHistory(env, {
     } catch {
       return { error: "bad_host" };
     }
-    const user = String(env.ROUTEROS_USER ?? "").trim();
-    const password = String(env.ROUTEROS_PASSWORD ?? "");
-    if (!user || !password) return { error: "not_configured" };
+    const account = credentials();
+    if (!account) return { error: "not_configured" };
+    const { user, password } = account;
 
     const target = new URL("/rest/interface?.proplist=name,rx-byte,tx-byte", origin);
     const token = Buffer.from(`${user}:${password}`, "utf8").toString("base64");
@@ -195,7 +204,8 @@ export function createHistory(env, {
       const result = await fetchRouter();
       if (result.error === "not_configured") {
         logState("paused: not configured");
-        delayMs = 60_000;
+        // Checking for credentials is free; resume within one interval after someone logs in.
+        delayMs = intervalMs;
       } else if (result.error === "auth") {
         logState("paused: auth");
         delayMs = 60_000;

@@ -354,7 +354,10 @@ async function withHistoryServer(env, historyOptions, fn) {
   const timer = makeFakeTimer();
   const history = createHistory(env, { ...historyOptions, setTimer: timer.setTimer, clearTimer: timer.clearTimer });
   history.start();
-  const server = listen(createHandler(env, { staticDir: false, history }));
+  const handlerOptions = { staticDir: false, history };
+  // Share the same request mock with the proxy handler so login auth calls work in non-demo mode.
+  if (historyOptions.request) handlerOptions.request = historyOptions.request;
+  const server = listen(createHandler(env, handlerOptions));
   await once(server, "listening");
   const { port } = server.address();
   try {
@@ -366,15 +369,26 @@ async function withHistoryServer(env, historyOptions, fn) {
   }
 }
 
+async function loginSession(port, { username = "demo", password = "demo" } = {}) {
+  const res = await fetch(`http://127.0.0.1:${port}/api/login`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ username, password }),
+  });
+  const setCookie = res.headers.get("set-cookie") ?? "";
+  return setCookie.match(/rut_sid=[^;]+/)?.[0] ?? "";
+}
+
 // --- Endpoint: 404 when history disabled ---
 
 test("endpoint 404 when history not passed to createHandler", async () => {
-  const handler = createHandler({}, { staticDir: false });
+  const handler = createHandler({ DEMO_MODE: "true" }, { staticDir: false });
   const server = listen(handler);
   await once(server, "listening");
   const { port } = server.address();
   try {
-    const res = await rawRequest(port, "/api/history?name=eth0");
+    const cookie = await loginSession(port);
+    const res = await rawRequest(port, "/api/history?name=eth0", { headers: { Cookie: cookie } });
     assert.equal(res.status, 404);
     assert.equal(JSON.parse(res.body).code, "history_disabled");
   } finally {
@@ -390,16 +404,19 @@ test("endpoint 400 for invalid interface name", async () => {
     { DEMO_MODE: "true" },
     {},
     async (port) => {
-      const res1 = await rawRequest(port, "/api/history?name=../../etc");
+      const cookie = await loginSession(port);
+      const h = { Cookie: cookie };
+
+      const res1 = await rawRequest(port, "/api/history?name=../../etc", { headers: h });
       assert.equal(res1.status, 400);
       assert.equal(JSON.parse(res1.body).code, "bad_name");
 
-      const res2 = await rawRequest(port, "/api/history"); // missing name
+      const res2 = await rawRequest(port, "/api/history", { headers: h }); // missing name
       assert.equal(res2.status, 400);
       assert.equal(JSON.parse(res2.body).code, "bad_name");
 
       const longName = "a".repeat(65);
-      const res3 = await rawRequest(port, `/api/history?name=${longName}`);
+      const res3 = await rawRequest(port, `/api/history?name=${longName}`, { headers: h });
       assert.equal(res3.status, 400);
     },
   );
@@ -422,10 +439,13 @@ test("endpoint 200 returns correct shape for known interface", async () => {
       now: () => nowMs,
     },
     async (port, timer) => {
+      tick = 0;
+      const cookie = await loginSession(port, { username: "u", password: "p" });
+
       tick = 0; await timer.fire();
       tick = 1; nowMs += 5000; await timer.fire();
 
-      const res = await rawRequest(port, "/api/history?name=liantong&range=300");
+      const res = await rawRequest(port, "/api/history?name=liantong&range=300", { headers: { Cookie: cookie } });
       assert.equal(res.status, 200);
       const body = JSON.parse(res.body);
       assert.equal(body.name, "liantong");
@@ -448,7 +468,8 @@ test("endpoint 200 with empty points for unknown interface", async () => {
     { DEMO_MODE: "true" },
     {},
     async (port) => {
-      const res = await rawRequest(port, "/api/history?name=no_such_iface&range=300");
+      const cookie = await loginSession(port);
+      const res = await rawRequest(port, "/api/history?name=no_such_iface&range=300", { headers: { Cookie: cookie } });
       assert.equal(res.status, 200);
       const body = JSON.parse(res.body);
       assert.equal(body.name, "no_such_iface");
@@ -460,13 +481,14 @@ test("endpoint 200 with empty points for unknown interface", async () => {
 // --- Endpoint: Cache-Control header ---
 
 test("endpoint sets Cache-Control: no-store", async () => {
-  const handler = createHandler({}, { staticDir: false });
+  const handler = createHandler({ DEMO_MODE: "true" }, { staticDir: false });
   const server = listen(handler);
   await once(server, "listening");
   const { port } = server.address();
   try {
+    const cookie = await loginSession(port);
     const res = await new Promise((resolve, reject) => {
-      const req = http.request({ hostname: "127.0.0.1", port, path: "/api/history?name=eth0" }, (r) => {
+      const req = http.request({ hostname: "127.0.0.1", port, path: "/api/history?name=eth0", headers: { Cookie: cookie } }, (r) => {
         const chunks = [];
         r.on("data", (c) => chunks.push(c));
         r.on("end", () => resolve({ status: r.statusCode, headers: r.headers, body: Buffer.concat(chunks).toString() }));
@@ -516,4 +538,43 @@ test("meta includes historyEnabled=false when history not passed", async () => {
     server.close();
     await once(server, "close");
   }
+});
+
+// --- Sampler credentials function ---
+
+test("sampler uses credentials() function; no network when it returns null", async () => {
+  const timer = makeFakeTimer();
+  let credResult = null;
+  let requestCalled = false;
+
+  const history = createHistory(
+    { ROUTEROS_HOST: "http://192.168.2.1" },
+    {
+      credentials: () => credResult,
+      request: async () => { requestCalled = true; return { status: 200, headers: {}, body: Buffer.from("[]") }; },
+      now: Date.now,
+      setTimer: timer.setTimer,
+      clearTimer: timer.clearTimer,
+    },
+  );
+  history.start();
+
+  // No credentials → not_configured; no network call
+  requestCalled = false;
+  await timer.fire();
+  assert.equal(requestCalled, false, "request should not be called when credentials() returns null");
+
+  // With credentials → network call made
+  credResult = { user: "u", password: "p" };
+  requestCalled = false;
+  await timer.fire();
+  assert.equal(requestCalled, true, "request should be called when credentials() returns account");
+
+  // Switch back to null → no call again
+  credResult = null;
+  requestCalled = false;
+  await timer.fire();
+  assert.equal(requestCalled, false, "request should stop when credentials() returns null again");
+
+  history.stop();
 });

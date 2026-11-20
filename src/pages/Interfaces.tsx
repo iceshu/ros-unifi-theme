@@ -2,7 +2,7 @@ import { createMemo, For, Show } from "solid-js";
 import { ReadTable } from "../components/ReadData";
 import { createTableSort, SortHeader } from "../components/TableSort";
 import { EmptyState, PageHeader, Pill, RateText } from "../components/ui";
-import { WriteToggle } from "../components/WriteToggle";
+import { EnableSwitch } from "../components/form";
 import { formatBytes } from "../lib/format";
 import { compareName, flag, ifaceRole, linkState, num, roleLabel, typeLabel, type Role, type RosRecord } from "../lib/model";
 import { useDashboard, type HistoryPoint } from "../lib/store";
@@ -182,7 +182,9 @@ export function InterfacesPage() {
                       </td>
                       <td class="whitespace-nowrap">
                         <Pill tone={linkState(row()).tone}>{linkState(row()).label}</Pill>
-                        <WriteToggle path="/rest/interface" row={row()} />
+                        <span class="ml-2 align-middle" onClick={(event) => event.stopPropagation()}>
+                          <EnableSwitch menu="/rest/interface" row={row()} label={row().name} confirm="禁用接口会立即断开经过它的连接。如果你正通过这个口访问路由器，页面会失联。" />
+                        </span>
                       </td>
                       <td><RateText bps={rate()?.rxBps} /></td>
                       <td><RateText bps={rate()?.txBps} /></td>

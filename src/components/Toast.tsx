@@ -5,7 +5,7 @@ import { dismissToast, toasts } from "../lib/toast";
 export function Toasts() {
   return (
     <div
-      class="pointer-events-none fixed right-4 bottom-4 z-[90] flex w-80 max-w-[calc(100vw-2rem)] flex-col gap-2"
+      class="pointer-events-none fixed bottom-5 left-1/2 z-[90] flex w-96 max-w-[calc(100vw-2rem)] -translate-x-1/2 flex-col gap-2"
       aria-live="polite"
       aria-relevant="additions"
     >

@@ -195,7 +195,7 @@ function clock(nowMs) {
   ];
 }
 
-export function demoBody(pathname, nowMs = Date.now()) {
+function baseBody(pathname, nowMs) {
   switch (pathname) {
     case "/rest/ip/firewall/nat":
       return [{ ".id": "*1", chain: "srcnat", action: "masquerade", "src-address": "192.168.2.0/24", "dst-address": "0.0.0.0/0", "to-addresses": "", comment: "LAN internet", disabled: "false", bytes: String(integratedBytes(nowMs, TRAFFIC.liantong.tx)), packets: String(Math.floor(integratedBytes(nowMs, TRAFFIC.liantong.tx) / 1200)) }];
@@ -220,11 +220,19 @@ export function demoBody(pathname, nowMs = Date.now()) {
     case "/rest/interface/vlan":
       return [{ ".id": "*1", name: "vlan-guest", interface: "bridge1", "vlan-id": "30", mtu: "1500", running: "true", disabled: "false" }];
     case "/rest/interface/wifi":
-      return [{ ".id": "*1", name: "wifi1", running: "true", disabled: "false", comment: "Home 5 GHz", "configuration.ssid": "Home" }];
+      return [{ ".id": "*1", name: "wifi1", running: "true", disabled: "false", comment: "Home 5 GHz", configuration: "home-5g", security: "home-sec", "configuration.ssid": "Home" }];
     case "/rest/interface/wifi/configuration":
-      return [{ ".id": "*1", name: "home-5g", ssid: "Home", country: "China", mode: "ap" }];
+      return [{ ".id": "*1", name: "home-5g", ssid: "Home", country: "China", mode: "ap", security: "home-sec" }];
+    case "/rest/interface/wifi/security":
+      return [{ ".id": "*1", name: "home-sec", "authentication-types": "wpa2-psk,wpa3-psk", passphrase: "demo-should-not-leak" }];
     case "/rest/interface/wifi/registration-table":
       return [{ ".id": "*1", interface: "wifi1", "mac-address": "02:CA:FE:12:34:56", "signal-strength": String(Math.round(wave(nowMs, -54, 3, 30))), "tx-rate": "866.7Mbps", "rx-rate": "780Mbps", uptime: rosUptime(nowMs) }];
+    case "/rest/interface/wireless":
+      return [];
+    case "/rest/interface/wireless/registration-table":
+      return [];
+    case "/rest/interface/wireless/security-profiles":
+      return [{ ".id": "*1", name: "default", mode: "dynamic-keys", "authentication-types": "wpa2-psk", "wpa2-pre-shared-key": "demo-should-not-leak", "wpa-pre-shared-key": "demo-should-not-leak" }];
     case "/rest/ppp/active":
       return [{ ".id": "*1", name: "home-vpn", service: "l2tp", "caller-id": "198.51.100.20", address: "192.168.90.10", uptime: rosUptime(nowMs) }];
     case "/rest/system/package":
@@ -576,4 +584,137 @@ function rule(id, chain, action, comment, extra, bytes, packets, disabled = fals
     packets,
     ...extra,
   };
+}
+
+/* ───────── Writable demo overlay ─────────
+ * Writes in demo mode change an in-memory copy so every form in the UI can be
+ * tried end to end. Counters of copied rows freeze; restart resets everything.
+ */
+
+/** Menus whose rows are copied on first write and served from the copy afterwards. */
+const TABLE_MENUS = new Set([
+  "/rest/ip/firewall/filter",
+  "/rest/ip/firewall/nat",
+  "/rest/ip/firewall/address-list",
+  "/rest/ip/dhcp-server/lease",
+  "/rest/ip/dns/static",
+  "/rest/queue/simple",
+  "/rest/interface/wifi",
+  "/rest/interface/wifi/configuration",
+  "/rest/interface/wifi/security",
+  "/rest/interface/wireguard/peers",
+]);
+/** Single-object menus changed with POST …/set. */
+const SINGLETONS = new Set(["/rest/ip/dns", "/rest/system/identity"]);
+
+const tables = new Map();
+const singletonPatch = new Map();
+/** Live-generated rows (interfaces) keep their counters; only these fields are overridden. */
+const rowPatch = new Map();
+let nextId = 0x100;
+
+export function resetDemoState() {
+  tables.clear();
+  singletonPatch.clear();
+  rowPatch.clear();
+  nextId = 0x100;
+}
+
+export function demoBody(pathname, nowMs = Date.now()) {
+  if (tables.has(pathname)) return structuredClone(tables.get(pathname));
+  const body = baseBody(pathname, nowMs);
+  if (body == null) return null;
+  if (SINGLETONS.has(pathname)) {
+    const patch = singletonPatch.get(pathname);
+    if (!patch) return body;
+    return Array.isArray(body) ? body.map((row) => ({ ...row, ...patch })) : { ...body, ...patch };
+  }
+  if (pathname === "/rest/interface") {
+    return body.map((row) => ({ ...row, ...(rowPatch.get(row[".id"]) ?? {}) }));
+  }
+  return body;
+}
+
+function table(menu, nowMs) {
+  if (!tables.has(menu)) tables.set(menu, structuredClone(baseBody(menu, nowMs) ?? []));
+  return tables.get(menu);
+}
+
+const DEFAULTS = {
+  "/rest/ip/firewall/filter": { disabled: "false", dynamic: "false", invalid: "false", bytes: "0", packets: "0" },
+  "/rest/ip/firewall/nat": { disabled: "false", dynamic: "false", invalid: "false", bytes: "0", packets: "0" },
+  "/rest/ip/firewall/address-list": { disabled: "false", dynamic: "false", timeout: "" },
+  "/rest/ip/dhcp-server/lease": { disabled: "false", dynamic: "false", status: "waiting", "last-seen": "never", blocked: "false", server: "dhcp1" },
+  "/rest/ip/dns/static": { disabled: "false", type: "A" },
+  "/rest/queue/simple": { disabled: "false", bytes: "0/0", packets: "0/0" },
+  "/rest/interface/wireguard/peers": { disabled: "false", rx: "0", tx: "0", "last-handshake": "" },
+};
+
+function moveRow(rows, ids, destination) {
+  const moving = rows.filter((row) => ids.includes(row[".id"]));
+  const rest = rows.filter((row) => !ids.includes(row[".id"]));
+  const at = destination ? rest.findIndex((row) => row[".id"] === destination) : -1;
+  rest.splice(at < 0 ? rest.length : at, 0, ...moving);
+  rows.splice(0, rows.length, ...rest);
+}
+
+/**
+ * Apply a validated write (see writes.mjs) to the demo state.
+ * @returns {{ status: number, body?: unknown }}
+ */
+export function demoWrite(method, pathname, body, nowMs = Date.now()) {
+  const notFound = { status: 404, body: { code: "not_found", message: "演示数据里没有这条记录。" } };
+  if (method === "PUT") {
+    if (!TABLE_MENUS.has(pathname)) return { status: 400, body: { code: "router_error", message: "演示数据不支持在这里新建。" } };
+    const rows = table(pathname, nowMs);
+    const { "place-before": before, ...fields } = body;
+    const row = { ".id": `*${(nextId++).toString(16).toUpperCase()}`, ...(DEFAULTS[pathname] ?? { disabled: "false" }), ...fields };
+    const at = before ? rows.findIndex((item) => item[".id"] === before) : -1;
+    rows.splice(at < 0 ? rows.length : at, 0, row);
+    return { status: 201, body: row };
+  }
+  const slash = pathname.lastIndexOf("/");
+  const menu = pathname.slice(0, slash);
+  const tail = pathname.slice(slash + 1);
+  if (method === "PATCH" || method === "DELETE") {
+    if (menu === "/rest/interface") {
+      if (method === "DELETE") return { status: 400, body: { code: "router_error", message: "接口不能删除。" } };
+      if (!baseBody(menu, nowMs).some((row) => row[".id"] === tail)) return notFound;
+      rowPatch.set(tail, { ...(rowPatch.get(tail) ?? {}), ...body });
+      return { status: 200, body: demoBody(menu, nowMs).find((row) => row[".id"] === tail) };
+    }
+    if (!TABLE_MENUS.has(menu)) return notFound;
+    const rows = table(menu, nowMs);
+    const index = rows.findIndex((row) => row[".id"] === tail);
+    if (index < 0) return notFound;
+    if (method === "DELETE") {
+      rows.splice(index, 1);
+      return { status: 204 };
+    }
+    Object.assign(rows[index], body);
+    if (menu === "/rest/interface/wifi" && body["configuration.ssid"] !== undefined) {
+      const config = table("/rest/interface/wifi/configuration", nowMs).find((row) => row.name === rows[index].configuration);
+      if (config) config.ssid = body["configuration.ssid"];
+    }
+    return { status: 200, body: rows[index] };
+  }
+  if (method === "POST") {
+    if (tail === "set" && SINGLETONS.has(menu)) {
+      singletonPatch.set(menu, { ...(singletonPatch.get(menu) ?? {}), ...body });
+      return { status: 200, body: [] };
+    }
+    if (tail === "move" && TABLE_MENUS.has(menu)) {
+      moveRow(table(menu, nowMs), String(body[".id"]).split(","), body.destination);
+      return { status: 200, body: [] };
+    }
+    if (tail === "make-static" && menu === "/rest/ip/dhcp-server/lease") {
+      const rows = table(menu, nowMs);
+      const row = rows.find((item) => item[".id"] === body[".id"]);
+      if (!row) return notFound;
+      row.dynamic = "false";
+      return { status: 200, body: [] };
+    }
+    if (tail === "reboot" && menu === "/rest/system") return { status: 200, body: [] };
+  }
+  return { status: 400, body: { code: "router_error", message: "演示数据不支持这个操作。" } };
 }

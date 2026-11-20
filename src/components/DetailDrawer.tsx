@@ -3,14 +3,14 @@ import { createEffect, createMemo, createSignal, For, onSettled, Show } from "so
 import { formatBytes } from "../lib/format";
 import { flag, linkState, typeLabel, type RosRecord, type Tone } from "../lib/model";
 import { connectionPath } from "../lib/path";
-import { useDashboard, type Selection } from "../lib/store";
+import { useDashboard, type DashboardApi, type Selection } from "../lib/store";
 import { sameMac } from "../lib/topology";
 import { InterfaceTraffic, ThroughputChart } from "./Chart";
 import { CopyText } from "./CopyText";
 import { DeviceIcon } from "./DeviceIcon";
 import { AllFields } from "./ReadData";
 import { Pill, RateText } from "./ui";
-import { WriteToggle } from "./WriteToggle";
+import { ClientActions, GatewayActions, IfaceActions, PeerActions } from "./actions";
 
 const COPYABLE = new Set(["IP 地址", "MAC 地址", "允许地址", "端点", "公网地址"]);
 
@@ -128,6 +128,7 @@ function DrawerContent(props: { sel: Selection }) {
         </button>
       </div>
       <div class="drawer-body fade-in">
+        <DrawerActions sel={props.sel} />
         <Show when={props.sel.type === "iface" || props.sel.type === "gateway" || props.sel.type === "internet"}>
           <section class="drawer-section">
             <InterfaceTraffic
@@ -138,7 +139,7 @@ function DrawerContent(props: { sel: Selection }) {
             />
           </section>
         </Show>
-        {props.sel.type === "client" ? <ClientTraffic ip={props.sel.ip} /> : null}
+        {props.sel.type === "client" ? <ClientTraffic ip={clientIp(dash, props.sel)} /> : null}
         {props.sel.type === "peer" ? <PeerTraffic id={props.sel.id} /> : null}
 
         <section class="drawer-section">
@@ -185,24 +186,32 @@ function DrawerContent(props: { sel: Selection }) {
               )}
             </For>
           </dl>
-          <Show when={props.sel.type === "iface" ? props.sel : null}>
-            {(iface) => (
-              <div class="mt-3">
-                <WriteToggle path="/rest/interface" row={dash.interfaces().find((row) => row.name === iface().name)} />
-              </div>
-            )}
-          </Show>
-          <Show when={props.sel.type === "peer" ? props.sel : null}>
-            {(peer) => (
-              <div class="mt-3">
-                <WriteToggle path="/rest/interface/wireguard/peers" row={(dash.wireguardPeers() ?? []).find((row) => row[".id"] === peer().id)} />
-              </div>
-            )}
-          </Show>
         </section>
 
         <RawFields sel={props.sel} />
       </div>
+    </>
+  );
+}
+
+/** A client keeps its MAC when its IP changes (fixed IP edits), so resolve the current IP from it. */
+function clientIp(dash: DashboardApi, sel: { ip: string; mac: string }): string {
+  return dash.clients().find((client) => !!sel.mac && sameMac(client.mac, sel.mac))?.ip || sel.ip;
+}
+
+/** Buttons for changing the selected thing; each module hides itself without the needed policy. */
+function DrawerActions(props: { sel: Selection }) {
+  const dash = useDashboard();
+  return (
+    <>
+      {(() => {
+        const current = props.sel;
+        if (current.type === "client") return <ClientActions ip={clientIp(dash, current)} mac={current.mac} />;
+        if (current.type === "iface") return <IfaceActions name={current.name} />;
+        if (current.type === "peer") return <PeerActions id={current.id} />;
+        if (current.type === "gateway") return <GatewayActions />;
+        return null;
+      })()}
     </>
   );
 }

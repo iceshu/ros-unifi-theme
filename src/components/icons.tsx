@@ -1,5 +1,6 @@
 import {
   ArrowLeftRight,
+  Forward,
   Globe,
   KeyRound,
   LayoutDashboard,
@@ -63,7 +64,8 @@ export const NAV: Array<{ title: string; items: NavItem[] }> = [
     title: "安全",
     items: [
       { href: "/firewall", label: "防火墙", icon: ShieldCheck, keywords: "firewall filter mangle" },
-      { href: "/nat", label: "NAT", icon: ArrowLeftRight, keywords: "端口转发 dstnat" },
+      { href: "/port-forwarding", label: "端口转发", icon: Forward, keywords: "port forward dstnat 映射" },
+      { href: "/nat", label: "NAT", icon: ArrowLeftRight, keywords: "srcnat masquerade" },
       { href: "/address-lists", label: "地址列表", icon: ListChecks, keywords: "address list" },
       { href: "/wireguard", label: "WireGuard", icon: KeyRound, keywords: "vpn wg" },
     ],

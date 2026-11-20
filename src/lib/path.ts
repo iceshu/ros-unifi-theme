@@ -89,7 +89,7 @@ export function connectionPath(dash: DashboardApi, sel: Selection): PathInfo {
     const facts: Fact[] = [
       ["连接方式", client?.wireless ? `无线 · ${client.ssid || port}` : port ? `有线 · ${port}` : "未定位"],
       ...(client?.wireless ? ([["信号", client.signal || "未提供"]] as Fact[]) : []),
-      ["IP 地址", sel.ip || lease?.address || arp?.address || "—"],
+      ["IP 地址", client?.ip || sel.ip || lease?.address || arp?.address || "—"],
       ["MAC 地址", sel.mac || "—"],
       ["厂商", client?.vendor || "未知"],
       ["DHCP 租约", lease ? `${dhcpStatusLabel(lease.status)}${lease["expires-after"] ? ` · 剩余 ${lease["expires-after"]}` : ""}` : "无租约（静态或仅 ARP）"],
