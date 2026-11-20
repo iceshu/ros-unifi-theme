@@ -1,3 +1,4 @@
+import { ArrowRight } from "@lucide/solid";
 import { WriteToggle } from "../components/WriteToggle";
 import { createMemo, createSignal, For } from "solid-js";
 import { EmptyState, PageHeader, Pill } from "../components/ui";
@@ -32,7 +33,7 @@ export function FirewallPage() {
       <PageHeader title="防火墙" />
       <div class="mb-4 flex gap-2">
         <ChainChip label="filter" on={tab() === "filter"} click={() => setTab("filter")} />
-        <a class="chip" href="/nat">NAT →</a>
+        <a class="chip" href="/nat">NAT <ArrowRight class="inline-block h-4 w-4" aria-hidden="true" /></a>
         <ChainChip label="mangle" on={tab() === "mangle"} click={() => setTab("mangle")} />
       </div>
       {tab() === "mangle" ? <ReadTable rows={dash.mangle()} fields={["chain", "action", "src-address", "dst-address", "new-routing-mark", "new-packet-mark", "passthrough", "comment", "disabled", "bytes", "packets"]} /> : <>
