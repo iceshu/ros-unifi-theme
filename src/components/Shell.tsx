@@ -4,30 +4,38 @@ import { formatAgo, formatBps } from "../lib/format";
 import { useDashboard } from "../lib/store";
 import { DetailDrawer } from "./DetailDrawer";
 import {
+  IconAddressList,
   IconDevices,
+  IconDhcp,
+  IconDns,
+  IconLog,
   IconMark,
+  IconNat,
+  IconNeighbors,
   IconOverview,
   IconPlug,
   IconPorts,
+  IconQueues,
   IconRoutes,
   IconShield,
   IconTunnel,
+  IconWifi,
 } from "./icons";
 
 const LINKS = [
   { href: "/", label: "概览", icon: IconOverview },
   { href: "/devices", label: "设备", icon: IconDevices },
   { href: "/interfaces", label: "接口", icon: IconPorts },
-  { href: "/wifi", label: "WiFi", icon: IconPorts },
+  { href: "/wifi", label: "WiFi", icon: IconWifi },
   { href: "/firewall", label: "防火墙", icon: IconShield },
-  { href: "/nat", label: "NAT", icon: IconShield },
-  { href: "/address-lists", label: "地址列表", icon: IconDevices },
+  { href: "/nat", label: "NAT", icon: IconNat },
+  { href: "/address-lists", label: "地址列表", icon: IconAddressList },
   { href: "/routes", label: "路由", icon: IconRoutes },
-  { href: "/dhcp", label: "DHCP", icon: IconDevices },
-  { href: "/dns", label: "DNS", icon: IconRoutes },
-  { href: "/neighbors", label: "邻居", icon: IconDevices },
-  { href: "/queues", label: "队列", icon: IconPorts },
-  { href: "/log", label: "日志", icon: IconOverview },
+  { href: "/dhcp", label: "DHCP", icon: IconDhcp },
+  { href: "/dns", label: "DNS", icon: IconDns },
+  { href: "/neighbors", label: "邻居", icon: IconNeighbors },
+  { href: "/queues", label: "队列", icon: IconQueues },
+  { href: "/log", label: "日志", icon: IconLog },
   { href: "/wireguard", label: "WireGuard", icon: IconTunnel },
 ];
 
