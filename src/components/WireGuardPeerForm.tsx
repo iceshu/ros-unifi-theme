@@ -62,7 +62,8 @@ export function WireGuardPeerForm(props: { peer?: RosRecord; interfaceName?: str
     if (config()) return true;
     const next: Record<string, string> = {};
     if (!iface()) next.iface = "没有 WireGuard 接口";
-    if (mode() === "existing") {
+    // Editing other fields must not be blocked by the key already stored on the router.
+    if (mode() === "existing" && (!original || publicKey().trim() !== original["public-key"])) {
       const keyError = validateWgKey(publicKey());
       if (keyError) next.publicKey = keyError;
     }
