@@ -1,6 +1,6 @@
 # 网关
 
-放在局域网里的只读网络仪表。浅色界面，打开就能看到路由器是否在线、互联网通不通、谁在用网。数据来自 MikroTik RouterOS 7 的 REST API。仪表跑在你自己的 N100 上，默认不创建、不修改、不删除路由器上的任何东西；可选写操作见下文。
+放在局域网里的只读网络仪表，界面向 UniFi Network 靠拢（浅色 / 深色可切换），打开就能看到路由器是否在线、互联网通不通、谁在用网、流量走向哪里。数据来自 MikroTik RouterOS 7 的 REST API。仪表跑在你自己的 N100 上，默认不创建、不修改、不删除路由器上的任何东西；可选写操作见下文。
 
 默认按这台家里的路由器来写示例，地址都可以改：
 
@@ -110,17 +110,19 @@ npm start
 
 ## 页面
 
-- **概览**：名称、RouterOS 版本、运行时间、CPU、内存、温度（有就显示，没有就写未报告）、PPPoE / 广域网状态、当前下载和上传，以及轮询得到的曲线。
-- **设备**：DHCP 租约（主机名、IP、MAC、状态、最近出现），能对上的 ARP 会标在旁边。可搜索。
-- **接口**：运行或禁用、类型、收发速率和字节、错误。广域网和局域网会分开标。
-- **防火墙**：filter / mangle 标签页及 NAT 链接。写操作启用后可切换 filter 规则启用/禁用。
-- **NAT**、**地址列表**：规则、地址、禁用状态及计数器。
-- **DHCP**、**DNS**：服务器、网络、地址池、DNS 配置与静态记录。
-- **邻居**、**队列**、**WiFi**：发现邻居、简单队列、WiFi 接口/配置/注册客户端；未安装 WiFi 菜单时显示空状态。
-- **日志**：最近 200 条，支持文本搜索；请求仅取 time、topics、message。
-- 接口与 DHCP 租约行可展开查看除 `.id` 外的全部返回字段；接口附带 ethernet 字段和 VLAN 表。概览在有会话时显示 PPP 会话。
+- **概览**：互联网 / 网关 / 客户端 / 系统资源四张状态卡；互联网流量曲线（5 分钟 / 1 小时 / 6 小时 / 24 小时，带峰值、平均和本时段用量）；流量最高的客户端；拓扑预览；客户端类型分布；接口实时速率；有会话时显示 PPP 会话。
+- **拓扑**：互联网 → 网关 → 端口 / WiFi / WireGuard → 客户端的树状图。连线上的蓝色虚线流向客户端表示下载，青色表示上传，线越粗流量越大。拖动平移、滚轮缩放、悬停高亮整条链路，点击任意节点打开详情。超过 8 台的端口可展开。
+- **客户端**：DHCP 租约、仅 ARP 的主机和无线注册客户端合在一张表：连接方式（端口或 SSID + 信号）、IP、MAC、实时下载/上传、当前连接用量、最近活动。可按在线/离线/有线/无线和设备类型筛选，按 `/` 搜索。
+- **端口**：以太网口面板（颜色表示协商速率，标出 WAN 口和在线设备数，下方是实时速率），以及全部接口的速率、迷你趋势、累计字节和错误。
+- **详情面板**：从任何表格行、拓扑节点、顶栏速率或搜索结果打开。包含实时速率与曲线、到互联网的连接路径（每一跳可点击）、详细信息，以及 RouterOS 返回的原始字段。
+- **全局搜索**：`Ctrl K`（Mac 上 `⌘K`）搜索页面、客户端、IP、MAC、端口和 WireGuard 对端。
+- **防火墙**：filter / mangle 标签页及 NAT 链接，按链筛选，命中流量条。写操作启用后可切换 filter 规则启用/禁用。
+- **NAT**、**地址列表**、**DHCP**、**DNS**、**邻居**、**队列**、**WiFi**：中文表头的列表，可筛选、排序，点击行展开全部字段；未安装的菜单显示空状态。
+- **日志**：最近 200 条，最新在前，支持文本搜索；请求仅取 time、topics、message。
 - **路由** 和 **WireGuard**：接口能干净返回时就显示。WireGuard 默认只看状态，启用写操作后可切换 peer 启用/禁用；私钥不会出现在页面上。
 - **连接**：已安装包、服务端配置了哪台路由器、账号有没有配（不显示密码），以及 www 未开、认证失败、主机不可达这几类错误。
+
+单台客户端的速率与用量来自 `/ip/firewall/connection` 连接表，只统计当前活动连接，且只保留打开页面后的采样；接口曲线来自服务端的历史采样（见下文），刷新页面也不会丢。
 
 互联网吞吐取 `WAN_INTERFACES` 里的 PPPoE 接口（默认 `liantong`）。`ether0` 是拨号的物理口，速率不再加一次，否则同一份流量会算两遍。
 
@@ -128,9 +130,10 @@ npm start
 
 - 默认只把 GET 和 HEAD 转到路由器。POST、PUT、PATCH、DELETE 返回 405。
 - `monitor-traffic` 不使用。它要 POST，而且不带 `once` 时会一直挂到 REST 大约 60 秒超时。速率是用两次 `GET /rest/interface` 的 `rx-byte` / `tx-byte` 相减得到的，大约每 2 秒一次。系统、租约、防火墙等大约每 8 秒读一次。浏览器标签放到后台后会放慢。
-- 路径白名单：`/rest/system/{resource,identity,clock,health,routerboard,package}`；`/rest/interface` 及其 `ethernet`、`bridge`、`bridge/port`、`list`、`list/member`、`pppoe-client`、`wireguard`、`wireguard/peers`、`vlan`、`wifi`、`wifi/configuration`、`wifi/registration-table`；`/rest/ip/{address,arp,dhcp-server,dhcp-server/lease,dhcp-server/network,pool,dns,dns/static,neighbor,firewall/filter,firewall/nat,firewall/mangle,firewall/address-list,route}`；`/rest/queue/simple`、`/rest/ppp/active`、`/rest/log`。花括号表示各独立路径。
+- 路径白名单：`/rest/system/{resource,identity,clock,health,routerboard,package}`；`/rest/interface` 及其 `ethernet`、`bridge`、`bridge/port`、`bridge/host`、`list`、`list/member`、`pppoe-client`、`wireguard`、`wireguard/peers`、`vlan`、`wifi`、`wifi/configuration`、`wifi/registration-table`；`/rest/ip/{address,arp,dhcp-server,dhcp-server/lease,dhcp-server/network,pool,dns,dns/static,neighbor,firewall/filter,firewall/nat,firewall/mangle,firewall/address-list,firewall/connection,route}`；`/rest/queue/simple`、`/rest/ppp/active`、`/rest/log`。花括号表示各独立路径。
 - 响应里的 `password`、`private-key`、`preshared-key` 等字段会删掉再交给浏览器。
 - 认证失败后会暂停大约 30 秒再试，避免触发路由器的登录限制。
+- 后台历史采样器（`HISTORY_ENABLED=true`，默认开启）：每隔 5 秒用同一只读账号发出一次 `GET /rest/interface`，计算每个接口的 rx/tx 速率并写入内存环形缓冲；浏览器访问 `/api/history` 即可取得最近 24 小时趋势，页面加载后图表立即有数据。历史数据纯内存，重启后清零。
 
 RouterOS 的 REST 从 7.1beta4 开始提供，返回的 JSON 里数字和布尔也都是字符串。单条菜单（例如 `/system/resource`）通常是只含一个对象的数组。
 
@@ -165,6 +168,8 @@ RouterOS 的 REST 从 7.1beta4 开始提供，返回的 JSON 里数字和布尔�
 | `DEMO_MODE` | `true` 时不访问路由器，页面标明演示数据。 |
 | `DASHBOARD_BIND` / `DASHBOARD_PORT` | 宿主机上的监听地址和端口，默认 `0.0.0.0:8080`。 |
 | `ROUTEROS_TIMEOUT_MS` | 单次读取超时，默认 8000，限制在 1000 到 20000。 |
+| `HISTORY_ENABLED` | 默认 `true`；设为 `false` 时关闭后台采样，`/api/history` 返回 404。 |
+| `HISTORY_INTERVAL_MS` | 历史采样间隔，毫秒，默认 5000，限制在 2000 到 60000。 |
 
 ## 对不上号时
 

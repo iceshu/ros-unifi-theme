@@ -10,11 +10,13 @@ import {
 import { ApiError, getMeta, getRest, toApiError, type Meta } from "./api";
 import {
   asRecords,
+  flag,
   parseHealth,
   pickTemperature,
   pickWanName,
   type RosRecord,
 } from "./model";
+import { collectClients, type TopoClient } from "./topology";
 import { ratesFromDeltas, summarizeConnections } from "./traffic";
 
 export interface Rate {
@@ -47,7 +49,8 @@ export type Selection =
   | { type: "client"; ip: string; mac: string }
   | { type: "iface"; name: string }
   | { type: "peer"; id: string }
-  | { type: "gateway" };
+  | { type: "gateway" }
+  | { type: "internet" };
 
 interface Counter {
   t: number;
@@ -110,6 +113,13 @@ export interface DashboardApi {
   primaryWan: Accessor<string | null>;
   wanNames: Accessor<string[]>;
   lanNames: Accessor<string[]>;
+  /** Name of the physical port under the PPPoE client, or the other configured WAN name. */
+  carrierName: Accessor<string>;
+  wanRow: Accessor<RosRecord | undefined>;
+  wanUp: Accessor<boolean>;
+  bridgeNames: Accessor<Set<string>>;
+  /** Every known client: DHCP leases, ARP-only hosts, WiFi registrations. */
+  clients: Accessor<TopoClient[]>;
   retry: () => void;
 }
 
@@ -219,6 +229,27 @@ export function createDashboard(): DashboardApi {
   const lanNames = createMemo(() => meta()?.lanInterfaces ?? ["bridge1"]);
   const temperature = createMemo(() => pickTemperature(health()));
   const primaryWan = createMemo(() => pickWanName(interfaces(), wanNames()));
+  const wanRow = createMemo(() => interfaces().find((row) => row.name === primaryWan()));
+  const wanUp = createMemo(() => !!wanRow() && flag(wanRow()?.running) && !flag(wanRow()?.disabled));
+  const carrierName = createMemo(() => {
+    const parent = pppoe().find((row) => row.name === primaryWan())?.interface;
+    if (parent) return parent;
+    return wanNames().find((name) => name !== primaryWan() && interfaces().some((row) => row.name === name)) ?? "";
+  });
+  const bridgeNames = createMemo(() => {
+    const names = new Set<string>(lanNames());
+    for (const row of interfaces()) if (row.type === "bridge" && row.name) names.add(row.name);
+    return names;
+  });
+  const clients = createMemo(() => {
+    const ssidFor = (name: string) => {
+      const radio = wifi().find((row) => row.name === name);
+      if (!radio) return "";
+      if (radio["configuration.ssid"]) return radio["configuration.ssid"];
+      return wifiConfig().find((row) => row.name === radio.configuration)?.ssid || "";
+    };
+    return collectClients(leases(), arp(), bridgeHosts() ?? [], bridgeNames(), wifiRegistration(), ssidFor);
+  });
 
   async function loadMeta(): Promise<ApiError | null> {
     try {
@@ -511,6 +542,11 @@ export function createDashboard(): DashboardApi {
     primaryWan,
     wanNames,
     lanNames,
+    carrierName,
+    wanRow,
+    wanUp,
+    bridgeNames,
+    clients,
     retry,
   };
 }

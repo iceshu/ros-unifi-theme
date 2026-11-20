@@ -1,67 +1,78 @@
-import { CopyText } from "./CopyText";
-import { createEffect, createMemo, createSignal, onCleanup, Show } from "solid-js";
-import { formatBps, formatBytes, formatLastSeen, formatUptime } from "../lib/format";
-import { arpStatusLabel, dhcpStatusLabel, hardwareLabel, leaseIdentity, linkState, type RosRecord } from "../lib/model";
-import { useDashboard, type HistoryPoint } from "../lib/store";
+import { ChevronRight, Cable, Globe, KeyRound, Router, Wifi, X } from "@lucide/solid";
+import { createEffect, createMemo, createSignal, For, onSettled, Show } from "solid-js";
+import { formatBytes } from "../lib/format";
+import { flag, linkState, typeLabel, type RosRecord, type Tone } from "../lib/model";
+import { connectionPath } from "../lib/path";
+import { useDashboard, type Selection } from "../lib/store";
 import { sameMac } from "../lib/topology";
+import { InterfaceTraffic, ThroughputChart } from "./Chart";
+import { CopyText } from "./CopyText";
 import { DeviceIcon } from "./DeviceIcon";
+import { AllFields } from "./ReadData";
+import { Pill, RateText } from "./ui";
+import { WriteToggle } from "./WriteToggle";
 
-function rateText(bps: number | null | undefined): string {
-  if (bps == null) return "—";
-  const formatted = formatBps(bps);
-  return formatted ? `${formatted.value} ${formatted.unit}` : "—";
+const COPYABLE = new Set(["IP 地址", "MAC 地址", "允许地址", "端点", "公网地址"]);
+
+function sameSelection(a: Selection | undefined, b: Selection | null): boolean {
+  return !!a && !!b && JSON.stringify(a) === JSON.stringify(b);
 }
 
+/**
+ * One side panel for every node type (client, port, peer, gateway, Internet),
+ * opened from tables, the topology map, the top bar and the command palette.
+ */
 export function DetailDrawer() {
   const dash = useDashboard();
-  const [selection, setSelection] = createSignal(dash.selection());
+  const [shown, setShown] = createSignal<Selection | null>(null);
   const [open, setOpen] = createSignal(false);
   let drawer: HTMLElement | undefined;
   let opener: HTMLElement | null = null;
-  createEffect(() => dash.selection(), (selected) => {
+
+  createEffect(dash.selection, (selected) => {
     if (selected) {
-      if (!selection()) opener = document.activeElement instanceof HTMLElement ? document.activeElement : null;
-      setSelection(selected);
-      const frame = requestAnimationFrame(() => { drawer?.getBoundingClientRect(); setOpen(true); drawer?.focus(); });
-      onCleanup(() => cancelAnimationFrame(frame));
-    } else {
-      setOpen(false);
-      if (opener?.isConnected) opener.focus({ preventScroll: true });
-      const timer = setTimeout(() => setSelection(null), 200);
-      onCleanup(() => clearTimeout(timer));
+      if (!shown()) opener = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+      setShown(selected);
+      const frame = requestAnimationFrame(() => {
+        setOpen(true);
+        drawer?.focus({ preventScroll: true });
+      });
+      return () => cancelAnimationFrame(frame);
     }
+    setOpen(false);
+    if (opener?.isConnected) opener.focus({ preventScroll: true });
+    const timer = setTimeout(() => setShown(null), 260);
+    return () => clearTimeout(timer);
   });
-  createEffect(() => true, () => {
+
+  onSettled(() => {
     const keydown = (event: KeyboardEvent) => {
+      if (!dash.selection() || !drawer) return;
       if (event.key === "Escape") dash.setSelection(null);
-      if (event.key === "Tab" && dash.selection() && drawer) {
+      if (event.key === "Tab") {
         const items = Array.from(drawer.querySelectorAll<HTMLElement>("button, a[href], input, [tabindex='0']"));
-        const first = items[0], last = items[items.length - 1];
-        if (event.shiftKey && (document.activeElement === first || document.activeElement === drawer)) { event.preventDefault(); last?.focus(); }
-        else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first?.focus(); }
+        const first = items[0];
+        const last = items[items.length - 1];
+        if (event.shiftKey && (document.activeElement === first || document.activeElement === drawer)) {
+          event.preventDefault();
+          last?.focus();
+        } else if (!event.shiftKey && document.activeElement === last) {
+          event.preventDefault();
+          first?.focus();
+        }
       }
     };
     document.addEventListener("keydown", keydown);
-    onCleanup(() => document.removeEventListener("keydown", keydown));
+    return () => document.removeEventListener("keydown", keydown);
   });
+
   return (
-    <Show when={selection()} keyed>
+    <Show when={shown()} keyed>
       {(sel) => (
         <>
           <div class={`drawer-backdrop ${open() ? "is-open" : ""}`} onClick={() => dash.setSelection(null)} />
           <aside ref={drawer} class={`drawer ${open() ? "is-open" : ""}`} role="dialog" aria-modal="true" aria-label="详情" tabindex={-1}>
-            <div class="mb-4 flex items-start justify-between gap-3">
-              <div class="text-sm text-faint">
-                {sel.type === "client" ? "设备" : sel.type === "peer" ? "WireGuard" : sel.type === "gateway" ? "网关" : "接口"}
-              </div>
-              <button type="button" class="chip" onClick={() => dash.setSelection(null)}>
-                关闭
-              </button>
-            </div>
-            {sel.type === "client" ? <ClientBody ip={sel.ip} mac={sel.mac} /> : null}
-            {sel.type === "iface" ? <IfaceBody name={sel.name} /> : null}
-            {sel.type === "peer" ? <PeerBody id={sel.id} /> : null}
-            {sel.type === "gateway" ? <GatewayBody /> : null}
+            <DrawerContent sel={sel} />
           </aside>
         </>
       )}
@@ -69,206 +80,272 @@ export function DetailDrawer() {
   );
 }
 
-function ClientBody(props: { ip: string; mac: string }) {
+function DrawerContent(props: { sel: Selection }) {
   const dash = useDashboard();
-  const lease = createMemo(() =>
-    dash.leases().find((row) => (props.mac && sameMac(row["mac-address"], props.mac)) || (props.ip && row.address === props.ip)),
+  const path = createMemo(() => connectionPath(dash, props.sel));
+  const header = createMemo(() => describe(props.sel));
+
+  function describe(sel: Selection): { title: string; subtitle: string; tone: Tone; status: string } {
+    if (sel.type === "client") {
+      const client = dash.clients().find((item) => sameMac(item.mac, sel.mac) || (!!sel.ip && item.ip === sel.ip));
+      return {
+        title: client?.title || sel.ip || "客户端",
+        subtitle: client?.subtitle || client?.vendor || "",
+        tone: client?.online ? "good" : "muted",
+        status: client?.online ? "在线" : "离线",
+      };
+    }
+    if (sel.type === "iface") {
+      const row = dash.interfaces().find((item) => item.name === sel.name) ?? (dash.wireguard() ?? []).find((item) => item.name === sel.name);
+      const state = linkState(row);
+      return { title: sel.name, subtitle: [typeLabel(row?.type), row?.comment].filter(Boolean).join(" · "), tone: state.tone, status: state.label };
+    }
+    if (sel.type === "peer") {
+      const peer = (dash.wireguardPeers() ?? []).find((row) => row[".id"] === sel.id);
+      const shook = !!peer?.["last-handshake"] && peer["last-handshake"] !== "never";
+      return { title: peer?.comment || "WireGuard 对端", subtitle: peer?.interface || "", tone: flag(peer?.disabled) ? "muted" : shook ? "good" : "warn", status: flag(peer?.disabled) ? "已禁用" : shook ? "已握手" : "未握手" };
+    }
+    if (sel.type === "gateway") {
+      const version = (dash.resource()?.version || "").replace(/\s*\(.*\)\s*$/, "");
+      return { title: dash.identity()?.name || "网关", subtitle: version ? `RouterOS ${version}` : "", tone: dash.resource() ? "good" : "muted", status: dash.resource() ? "在线" : "未知" };
+    }
+    return { title: "互联网", subtitle: dash.primaryWan() || "", tone: dash.wanUp() ? "good" : "bad", status: dash.wanUp() ? "已连接" : "未连接" };
+  }
+
+  return (
+    <>
+      <div class="drawer-head">
+        <HeaderIcon sel={props.sel} />
+        <div class="min-w-0 flex-1">
+          <h2 class="truncate text-[16px] font-semibold">{header().title}</h2>
+          <div class="mt-0.5 flex items-center gap-2 text-[12.5px] text-muted">
+            <Pill tone={header().tone}>{header().status}</Pill>
+            <span class="truncate">{header().subtitle}</span>
+          </div>
+        </div>
+        <button type="button" class="icon-btn" aria-label="关闭" onClick={() => dash.setSelection(null)}>
+          <X aria-hidden="true" />
+        </button>
+      </div>
+      <div class="drawer-body fade-in">
+        <Show when={props.sel.type === "iface" || props.sel.type === "gateway" || props.sel.type === "internet"}>
+          <section class="drawer-section">
+            <InterfaceTraffic
+              name={props.sel.type === "iface" ? props.sel.name : dash.primaryWan()}
+              height={180}
+              initialRange={3600}
+              compact
+            />
+          </section>
+        </Show>
+        {props.sel.type === "client" ? <ClientTraffic ip={props.sel.ip} /> : null}
+        {props.sel.type === "peer" ? <PeerTraffic id={props.sel.id} /> : null}
+
+        <section class="drawer-section">
+          <h3>连接路径</h3>
+          <div class="hops">
+            <For each={path().hops}>
+              {(hop, index) => (
+                <>
+                  {index() > 0 ? <ChevronRight class="hop-arrow h-3.5 w-3.5" aria-hidden="true" /> : null}
+                  {hop.selection && !sameSelection(hop.selection, props.sel) ? (
+                    <button type="button" class="hop" onClick={() => dash.setSelection(hop.selection ?? null)} title={hop.status}>
+                      <i class={`led led-${hop.tone}`} />
+                      <span class="min-w-0">
+                        <span class="block text-[10.5px] text-faint">{hop.label}</span>
+                        <span class="block truncate">{hop.name}</span>
+                      </span>
+                    </button>
+                  ) : (
+                    <span class={`hop ${sameSelection(hop.selection, props.sel) ? "is-current" : ""}`} title={hop.status}>
+                      <i class={`led led-${hop.tone}`} />
+                      <span class="min-w-0">
+                        <span class="block text-[10.5px] text-faint">{hop.label}</span>
+                        <span class="block truncate">{hop.name}</span>
+                      </span>
+                    </span>
+                  )}
+                </>
+              )}
+            </For>
+          </div>
+        </section>
+
+        <section class="drawer-section">
+          <h3>详细信息</h3>
+          <dl class="kv">
+            <For each={path().facts}>
+              {(fact) => (
+                <>
+                  <dt>{fact[0]}</dt>
+                  <dd class={/地址|端点/.test(fact[0]) ? "font-mono text-[12.5px]" : ""}>
+                    {COPYABLE.has(fact[0]) && fact[1] !== "—" && !fact[1].includes("\n") ? <CopyText value={fact[1]} class="justify-end" /> : fact[1]}
+                  </dd>
+                </>
+              )}
+            </For>
+          </dl>
+          <Show when={props.sel.type === "iface" ? props.sel : null}>
+            {(iface) => (
+              <div class="mt-3">
+                <WriteToggle path="/rest/interface" row={dash.interfaces().find((row) => row.name === iface().name)} />
+              </div>
+            )}
+          </Show>
+          <Show when={props.sel.type === "peer" ? props.sel : null}>
+            {(peer) => (
+              <div class="mt-3">
+                <WriteToggle path="/rest/interface/wireguard/peers" row={(dash.wireguardPeers() ?? []).find((row) => row[".id"] === peer().id)} />
+              </div>
+            )}
+          </Show>
+        </section>
+
+        <RawFields sel={props.sel} />
+      </div>
+    </>
   );
-  const arp = createMemo(() =>
-    dash.arp().find((row) => (props.mac && sameMac(row["mac-address"], props.mac)) || (props.ip && row.address === props.ip)),
-  );
-  const identity = createMemo(() => (lease() ? leaseIdentity(lease() as RosRecord) : null));
-  const port = createMemo(() => {
-    const mac = props.mac || lease()?.["mac-address"] || "";
-    const hosts = dash.bridgeHosts() ?? [];
-    const bridges = new Set(dash.interfaces().filter((row) => row.type === "bridge").map((row) => row.name));
-    for (const name of dash.lanNames()) bridges.add(name);
-    const row = hosts.find((host) => sameMac(host["mac-address"], mac) && host.local !== "true");
-    const on = row?.["on-interface"] || "";
-    if (on && !bridges.has(on)) return on;
-    return arp()?.interface || "";
+}
+
+function HeaderIcon(props: { sel: Selection }) {
+  const dash = useDashboard();
+  const client = createMemo(() => {
+    const sel = props.sel;
+    return sel.type === "client" ? dash.clients().find((item) => sameMac(item.mac, sel.mac) || (!!sel.ip && item.ip === sel.ip)) : undefined;
   });
+  const iconClass = "grid h-10 w-10 shrink-0 place-items-center rounded-xl";
+  if (props.sel.type === "client") return <DeviceIcon kind={client()?.kind ?? "generic"} online={client()?.online} />;
+  if (props.sel.type === "gateway") return <span class={`${iconClass} bg-accent text-white`}><Router class="h-5 w-5" aria-hidden="true" /></span>;
+  if (props.sel.type === "internet") return <span class={`${iconClass} bg-accent-soft text-accent`}><Globe class="h-5 w-5" aria-hidden="true" /></span>;
+  if (props.sel.type === "peer") return <span class={`${iconClass} bg-hover text-muted`}><KeyRound class="h-5 w-5" aria-hidden="true" /></span>;
+  const sel = props.sel;
+  const wifi = dash.wifi().some((row) => row.name === sel.name);
+  return <span class={`${iconClass} bg-hover text-muted`}>{wifi ? <Wifi class="h-5 w-5" aria-hidden="true" /> : <Cable class="h-5 w-5" aria-hidden="true" />}</span>;
+}
+
+function ClientTraffic(props: { ip: string }) {
+  const dash = useDashboard();
   const traffic = createMemo(() => dash.clientTraffic()[props.ip]);
   const history = createMemo(() => dash.clientHistory()[props.ip] ?? []);
-
+  const maxPeer = createMemo(() => Math.max(1, ...(traffic()?.peers ?? []).map((peer) => peer.bytes)));
   return (
-    <div class="space-y-4">
-      <div class="flex items-center gap-3">
-        <DeviceIcon kind={identity()?.kind ?? "generic"} />
-        <div class="min-w-0">
-          <h2 class="truncate text-lg font-medium"><CopyText value={identity()?.title || props.ip || "设备"}>{identity()?.title || props.ip || "设备"}</CopyText></h2>
-          {identity()?.subtitle ? <p class="truncate text-sm text-faint"><CopyText value={identity()?.subtitle || ""}>{identity()?.subtitle}</CopyText></p> : null}
-        </div>
-      </div>
-      <dl class="grid grid-cols-2 gap-3 text-sm">
-        <Field label="IP" value={props.ip || lease()?.address || "—"} />
-        <Field label="MAC" value={props.mac || lease()?.["mac-address"] || "—"} />
-        <Field label="租约" value={lease() ? dhcpStatusLabel(lease()?.status) : "无租约"} />
-        <Field label="最近出现" value={formatLastSeen(lease()?.["last-seen"])} />
-        <Field label="端口" value={port() || "未定位"} />
-        <Field label="ARP" value={arpStatusLabel(arp()?.status)} />
-      </dl>
-      <Show
-        when={dash.connectionsLoaded() && dash.connections() !== null}
-        fallback={
-          <p class="text-sm text-faint">
-            {dash.connectionsLoaded() ? "这台路由器没有连接表。" : "正在读取连接表。"}
-          </p>
-        }
-      >
-        <div>
-          <div class="kicker">当前流量</div>
-          <p class="mt-1 text-[11px] text-faint">来自防火墙连接表。路由器不保存这台设备的长期曲线。</p>
-          <div class="mt-2 flex gap-6">
-            <div>
-              <div class="text-xs text-faint">下载</div>
-              <div class="text-lg tabular-nums">{rateText(traffic()?.rxBps)}</div>
-            </div>
-            <div>
-              <div class="text-xs text-faint">上传</div>
-              <div class="text-lg tabular-nums">{rateText(traffic()?.txBps)}</div>
-            </div>
+    <Show
+      when={dash.connectionsLoaded() && dash.connections() !== null}
+      fallback={
+        <section class="drawer-section text-[13px] text-faint">
+          {dash.connectionsLoaded() ? "这台路由器没有连接跟踪表，无法统计单台设备流量。" : "正在读取连接表…"}
+        </section>
+      }
+    >
+      <section class="drawer-section">
+        <div class="flex gap-8">
+          <div>
+            <div class="kicker">下载</div>
+            <RateText bps={traffic()?.rxBps} class="big-rate rate-down" />
           </div>
-          <Spark points={history()} />
-          <div class="mt-3 text-sm text-muted">{traffic()?.connections ?? 0} 条活动连接</div>
-          <div class="mt-1 text-xs text-faint">
-            累计上传 {formatBytes(traffic()?.upBytes ?? 0)} · 下载 {formatBytes(traffic()?.downBytes ?? 0)}
+          <div>
+            <div class="kicker">上传</div>
+            <RateText bps={traffic()?.txBps} class="big-rate rate-up" />
+          </div>
+          <div>
+            <div class="kicker">活动连接</div>
+            <div class="big-rate">{traffic()?.connections ?? 0}</div>
           </div>
         </div>
-        <div>
-          <div class="kicker">对端</div>
-          <p class="mt-1 text-[11px] text-faint">当前连接表里的目的地址，按累计字节。</p>
-          {(traffic()?.peers.length ?? 0) === 0 ? <p class="mt-2 text-sm text-faint">没有进行中的连接。</p> : null}
-          <ul class="mt-2 space-y-1">
-            {(traffic()?.peers ?? []).map((peer) => (
-              <li class="flex items-center justify-between gap-3 text-sm">
-                <CopyText class="font-mono" value={peer.ip} />
-                <span class="text-faint">
-                  {peer.count} · {formatBytes(peer.bytes)}
-                </span>
-              </li>
-            ))}
+        <div class="mt-2">
+          <ThroughputChart points={history()} now={dash.now()} range={Math.max(60, Math.min(600, history().length * 8))} height={150} legend={false} />
+        </div>
+        <p class="mt-1 text-[11.5px] text-faint">
+          来自防火墙连接表，约每 8 秒一次，仅保留打开页面后的采样。当前连接累计：↓ {formatBytes(traffic()?.downBytes ?? 0)} · ↑ {formatBytes(traffic()?.upBytes ?? 0)}
+        </p>
+      </section>
+      <section class="drawer-section">
+        <h3>主要连接对端</h3>
+        <Show when={(traffic()?.peers.length ?? 0) > 0} fallback={<p class="text-[13px] text-faint">没有进行中的连接。</p>}>
+          <ul class="space-y-2">
+            <For each={traffic()?.peers ?? []}>
+              {(peer) => (
+                <li class="text-[13px]">
+                  <div class="flex items-center justify-between gap-3">
+                    <CopyText class="font-mono text-[12.5px]" value={peer.ip} />
+                    <span class="num text-faint">
+                      {peer.count} 条 · {formatBytes(peer.bytes)}
+                    </span>
+                  </div>
+                  <div class="meter mt-1">
+                    <i style={{ width: `${(peer.bytes / maxPeer()) * 100}%` }} />
+                  </div>
+                </li>
+              )}
+            </For>
           </ul>
-        </div>
-      </Show>
-    </div>
+        </Show>
+      </section>
+    </Show>
   );
 }
 
-function IfaceBody(props: { name: string }) {
-  const dash = useDashboard();
-  const row = createMemo(() => dash.interfaces().find((item) => item.name === props.name));
-  const rate = createMemo(() => dash.rates()[props.name]);
-  return (
-    <div class="space-y-3">
-      <h2 class="text-lg font-medium">{props.name}</h2>
-      <p class="text-sm text-muted">
-        {row()?.type || ""} {row()?.comment ? `· ${row()?.comment}` : ""} · {linkState(row()).label}
-      </p>
-      <div class="flex gap-6">
-        <div>
-          <div class="text-xs text-faint">接收</div>
-          <div class="text-lg tabular-nums">{rateText(rate()?.rxBps)}</div>
-        </div>
-        <div>
-          <div class="text-xs text-faint">发送</div>
-          <div class="text-lg tabular-nums">{rateText(rate()?.txBps)}</div>
-        </div>
-      </div>
-      <p class="text-[11px] text-faint">接口计数器差分，和总览上的广域网曲线同一来源。</p>
-      <Spark points={dash.history()[props.name] ?? []} />
-      <div class="text-xs text-faint">
-        累计收 {formatBytes(row()?.["rx-byte"])} · 发 {formatBytes(row()?.["tx-byte"])}
-      </div>
-    </div>
-  );
-}
-
-function PeerBody(props: { id: string }) {
+function PeerTraffic(props: { id: string }) {
   const dash = useDashboard();
   const peer = createMemo(() => (dash.wireguardPeers() ?? []).find((row) => row[".id"] === props.id));
   const rate = createMemo(() => dash.peerRates()[props.id]);
   return (
-    <div class="space-y-3">
-      <h2 class="text-lg font-medium">{peer()?.comment || "对端"}</h2>
-      <dl class="grid grid-cols-2 gap-3 text-sm">
-        <Field label="接口" value={peer()?.interface || "—"} />
-        <Field label="允许地址" value={peer()?.["allowed-address"] || "—"} />
-        <Field
-          label="端点"
-          value={
-            peer()?.["current-endpoint-address"]
-              ? `${peer()?.["current-endpoint-address"]}:${peer()?.["current-endpoint-port"] || ""}`
-              : "—"
-          }
-        />
-        <Field label="握手" value={formatLastSeen(peer()?.["last-handshake"])} />
-      </dl>
-      <div class="flex gap-6">
+    <section class="drawer-section">
+      <div class="flex gap-8">
         <div>
-          <div class="text-xs text-faint">下载</div>
-          <div class="text-lg tabular-nums">{rateText(rate()?.rxBps)}</div>
+          <div class="kicker">接收</div>
+          <RateText bps={rate()?.rxBps} class="big-rate rate-up" />
         </div>
         <div>
-          <div class="text-xs text-faint">上传</div>
-          <div class="text-lg tabular-nums">{rateText(rate()?.txBps)}</div>
+          <div class="kicker">发送</div>
+          <RateText bps={rate()?.txBps} class="big-rate rate-down" />
         </div>
       </div>
-      <p class="text-[11px] text-faint">对端计数器差分。没有采样间隔前只显示累计字节。</p>
-      <div class="text-xs text-faint">
-        累计收 {formatBytes(peer()?.rx)} · 发 {formatBytes(peer()?.tx)}
-      </div>
-    </div>
-  );
-}
-
-function GatewayBody() {
-  const dash = useDashboard();
-  const wan = () => dash.primaryWan();
-  const rate = () => (wan() ? dash.rates()[wan()!] : undefined);
-  return (
-    <div class="space-y-3">
-      <h2 class="text-lg font-medium">{dash.identity()?.name || "网关"}</h2>
-      <p class="text-sm text-muted">
-        {hardwareLabel(dash.resource(), dash.routerboard())} · {(dash.resource()?.version || "").replace(/\s*\(.*\)\s*$/, "")}
+      <p class="mt-2 text-[12px] text-faint">
+        累计 收 {formatBytes(peer()?.rx)} · 发 {formatBytes(peer()?.tx)}
       </p>
-      <p class="text-sm text-faint">运行 {formatUptime(dash.resource()?.uptime)}</p>
-      <div>
-        <div class="kicker">{wan() || "广域网"}</div>
-        <div class="mt-1 text-sm">
-          ↓ {rateText(rate()?.rxBps)} ↑ {rateText(rate()?.txBps)}
-        </div>
-      </div>
-    </div>
+    </section>
   );
 }
 
-function Field(props: { label: string; value: string }) {
-  return (
-    <div class="min-w-0">
-      <dt class="kicker">{props.label}</dt>
-      <dd class="mt-1 truncate font-mono text-xs">{["IP", "MAC", "允许地址", "端点"].includes(props.label) && props.value !== "—" ? <CopyText value={props.value} /> : props.value}</dd>
-    </div>
-  );
-}
-
-function Spark(props: { points: HistoryPoint[] }) {
-  const path = createMemo(() => {
-    const points = props.points;
-    if (points.length < 2) return "";
-    const max = Math.max(...points.flatMap((point) => [point.rxBps, point.txBps]), 1);
-    const w = 280;
-    const h = 64;
-    const x = (index: number) => (index / (points.length - 1)) * w;
-    const y = (value: number) => h - (value / max) * (h - 4) - 2;
-    return points.map((point, index) => `${index === 0 ? "M" : "L"} ${x(index).toFixed(1)} ${y(point.rxBps).toFixed(1)}`).join(" ");
+function RawFields(props: { sel: Selection }) {
+  const dash = useDashboard();
+  const [open, setOpen] = createSignal(false);
+  const records = createMemo(() => {
+    const sel = props.sel;
+    const out: Array<{ label: string; row: RosRecord | null | undefined }> = [];
+    if (sel.type === "client") {
+      const client = dash.clients().find((item) => sameMac(item.mac, sel.mac) || (!!sel.ip && item.ip === sel.ip));
+      out.push({ label: "DHCP 租约", row: client?.lease }, { label: "ARP", row: client?.arp });
+      out.push({ label: "无线注册", row: dash.wifiRegistration().find((row) => sameMac(row["mac-address"], sel.mac)) });
+    } else if (sel.type === "iface") {
+      out.push({ label: "interface", row: dash.interfaces().find((item) => item.name === sel.name) });
+      out.push({ label: "ethernet", row: dash.ethernet().find((item) => item.name === sel.name) });
+    } else if (sel.type === "peer") {
+      out.push({ label: "peer", row: (dash.wireguardPeers() ?? []).find((row) => row[".id"] === sel.id) });
+    } else if (sel.type === "gateway") {
+      out.push({ label: "system/resource", row: dash.resource() });
+    }
+    return out.filter((entry): entry is { label: string; row: RosRecord } => !!entry.row);
   });
   return (
-    <Show when={props.points.length >= 2} fallback={null}>
-      <svg viewBox="0 0 280 64" class="mt-3 h-16 w-full" aria-hidden="true">
-        <path d={path()} fill="none" stroke="#3ec6d6" stroke-width="1.6" />
-      </svg>
-      <p class="text-[11px] text-faint">最近几次采样，不是长期历史。</p>
+    <Show when={records().length > 0}>
+      <section class="drawer-section">
+        <button type="button" class="flex w-full items-center justify-between text-[12px] font-semibold text-muted" aria-expanded={open() ? "true" : "false"} onClick={() => setOpen(!open())}>
+          RouterOS 原始字段
+          <ChevronRight class="h-4 w-4 transition-transform" style={{ transform: open() ? "rotate(90deg)" : "none" }} aria-hidden="true" />
+        </button>
+        <Show when={open()}>
+          <For each={records()}>
+            {(entry) => (
+              <div class="mt-3">
+                <div class="kicker">{entry.label}</div>
+                <AllFields row={entry.row} copy />
+              </div>
+            )}
+          </For>
+        </Show>
+      </section>
     </Show>
   );
 }

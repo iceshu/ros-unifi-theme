@@ -1,11 +1,15 @@
 import http from "node:http";
 import { createHandler, loadEnvFile, parseBool, normalizeRouterHost } from "./ros-proxy.mjs";
+import { createHistory } from "./history.mjs";
 
 loadEnvFile();
 
 const port = Number(process.env.PORT || 8080);
 const bind = process.env.BIND_HOST || "0.0.0.0";
-const handler = createHandler(process.env);
+const historyEnabled = parseBool(process.env.HISTORY_ENABLED ?? "true");
+const history = historyEnabled ? createHistory(process.env) : null;
+if (history) history.start();
+const handler = createHandler(process.env, { history: history ?? undefined });
 const server = http.createServer((req, res) => {
   Promise.resolve(handler(req, res))
     .then((handled) => {

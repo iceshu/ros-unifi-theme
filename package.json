@@ -10,7 +10,7 @@
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
     "start": "node server/index.mjs",
-    "test": "node --test shared/format.test.mjs shared/traffic.test.mjs server/ros-proxy.test.mjs",
+    "test": "node --test shared/format.test.mjs shared/traffic.test.mjs server/ros-proxy.test.mjs server/history.test.mjs",
     "check": "tsc --noEmit"
   },
   "dependencies": {

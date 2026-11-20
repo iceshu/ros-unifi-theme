@@ -41,7 +41,10 @@ export function WireGuardPage() {
                   <div class="mt-4 space-y-3">
                     <For each={(dash.wireguardPeers() ?? []).filter((peer) => peer.interface === iface.name)}>
                       {(peer) => (
-                        <article class="rounded-2xl border border-line bg-canvas/40 p-4">
+                        <article
+                          class="cursor-pointer rounded-xl border border-line bg-panel-2 p-4 transition-colors hover:border-line-strong"
+                          onClick={() => dash.setSelection({ type: "peer", id: peer[".id"] || "" })}
+                        >
                           <div class="flex flex-wrap items-center justify-between gap-2">
                             <h3 class="font-medium">{peer.comment || shortKey(peer["public-key"])}</h3>
                             <Pill tone={handshakeTone(peer["last-handshake"])}>

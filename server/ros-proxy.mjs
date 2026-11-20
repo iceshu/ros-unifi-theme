@@ -286,7 +286,7 @@ export function classifyNetworkError(error) {
   };
 }
 
-function timeoutMs(env) {
+export function timeoutMs(env) {
   const n = Number(env.ROUTEROS_TIMEOUT_MS ?? 8000);
   if (!Number.isFinite(n)) return 8000;
   return Math.min(20_000, Math.max(1000, Math.round(n)));
@@ -318,7 +318,7 @@ function sendJson(res, status, payload, { demo = false } = {}) {
   res.end(body);
 }
 
-function routerRequest(target, { method, headers, timeout, insecure, signal, body }) {
+export function routerRequest(target, { method, headers, timeout, insecure, signal, body }) {
   return new Promise((resolve, reject) => {
     const lib = target.protocol === "https:" ? https : http;
     let settled = false;
@@ -561,9 +561,35 @@ export function createHandler(env, options = {}) {
         sendJson(res, 403, { code: site, message: "已拒绝跨站请求。请从仪表自己的页面访问。" });
         return true;
       }
-      sendJson(res, 200, metaPayload(env), { demo });
+      sendJson(res, 200, { ...metaPayload(env), historyEnabled: !!options.history }, { demo });
       return true;
     }
+
+    if (pathname === "/api/history") {
+      if (method !== "GET" && method !== "HEAD") {
+        sendJson(res, 405, { code: "method_not_allowed", message: "只接受 GET。" });
+        return true;
+      }
+      const site = crossSiteError(req.headers);
+      if (site) {
+        sendJson(res, 403, { code: site, message: "已拒绝跨站请求。请从仪表自己的页面访问。" });
+        return true;
+      }
+      if (!options.history) {
+        sendJson(res, 404, { code: "history_disabled", message: "历史记录功能未启用。设置 HISTORY_ENABLED=true 重启后生效。" });
+        return true;
+      }
+      const rawName = url.searchParams.get("name") || "";
+      if (!rawName || !/^[\w.@:+-]{1,64}$/.test(rawName)) {
+        sendJson(res, 400, { code: "bad_name" });
+        return true;
+      }
+      const rawRange = url.searchParams.get("range");
+      const rangeSec = rawRange != null ? Number(rawRange) : 300;
+      sendJson(res, 200, options.history.query(rawName, rangeSec), { demo });
+      return true;
+    }
+
 
     if (pathname.startsWith("/rest")) {
       const site = crossSiteError(req.headers);

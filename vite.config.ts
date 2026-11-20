@@ -1,13 +1,18 @@
 import tailwindcss from "@tailwindcss/vite";
 import solid from "@solidjs/vite-plugin";
 import { defineConfig, loadEnv, type Plugin } from "vite";
-import { createHandler } from "./server/ros-proxy.mjs";
+import { createHandler, parseBool } from "./server/ros-proxy.mjs";
+import { createHistory } from "./server/history.mjs";
 
 function routerosDevProxy(env: Record<string, string | undefined>): Plugin {
-  const handler = createHandler(env, { staticDir: false });
   return {
     name: "routeros-dev-proxy",
     configureServer(server) {
+      // Sampler only for `vite` dev, never during `vite build`.
+      const history = parseBool(env.HISTORY_ENABLED ?? "true") ? createHistory(env) : undefined;
+      history?.start();
+      server.httpServer?.once("close", () => history?.stop());
+      const handler = createHandler(env, { staticDir: false, history });
       // Same read-only proxy as production. Registered before Vite's SPA
       // fallback so /rest and /api are not swallowed by index.html.
       server.middlewares.use((req, res, next) => {

@@ -13,80 +13,66 @@ import {
   ScrollText,
   ServerCog,
   ShieldCheck,
+  Share2,
   Wifi,
 } from "@lucide/solid";
 
-type IconProps = { class?: string };
-
-export function IconMark(props: IconProps = {}) {
+export function IconMark(props: { class?: string }) {
   return (
-    <svg viewBox="0 0 32 32" class={props.class ?? "h-9 w-9 text-accent"} aria-hidden="true">
-      <g fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round">
-        <path d="M6 19a10 10 0 0 1 20 0" opacity="0.35" />
-        <path d="M10 19a6 6 0 0 1 12 0" opacity="0.7" />
-        <path d="M14 19a2 2 0 0 1 4 0" />
+    <svg viewBox="0 0 32 32" class={props.class ?? "h-8 w-8"} aria-hidden="true">
+      <rect width="32" height="32" rx="8" fill="var(--color-accent)" />
+      <g fill="none" stroke="#fff" stroke-width="1.9" stroke-linecap="round">
+        <path d="M7.5 18.5a8.5 8.5 0 0 1 17 0" opacity="0.45" />
+        <path d="M11 18.5a5 5 0 0 1 10 0" opacity="0.75" />
       </g>
-      <circle cx="16" cy="19.2" r="1.4" fill="currentColor" />
+      <circle cx="16" cy="19" r="1.9" fill="#fff" />
     </svg>
   );
 }
 
-export function IconOverview(props: IconProps) {
-  return <LayoutDashboard class={props.class ?? "h-5 w-5"} aria-hidden="true" />;
+export interface NavItem {
+  href: string;
+  label: string;
+  icon: typeof Globe;
+  keywords?: string;
 }
 
-export function IconDevices(props: IconProps) {
-  return <MonitorSmartphone class={props.class ?? "h-5 w-5"} aria-hidden="true" />;
-}
-
-export function IconPorts(props: IconProps) {
-  return <Network class={props.class ?? "h-5 w-5"} aria-hidden="true" />;
-}
-
-export function IconShield(props: IconProps) {
-  return <ShieldCheck class={props.class ?? "h-5 w-5"} aria-hidden="true" />;
-}
-
-export function IconRoutes(props: IconProps) {
-  return <Route class={props.class ?? "h-5 w-5"} aria-hidden="true" />;
-}
-
-export function IconTunnel(props: IconProps) {
-  return <KeyRound class={props.class ?? "h-5 w-5"} aria-hidden="true" />;
-}
-
-export function IconPlug(props: IconProps) {
-  return <PlugZap class={props.class ?? "h-5 w-5"} aria-hidden="true" />;
-}
-
-export function IconWifi(props: IconProps) {
-  return <Wifi class={props.class ?? "h-5 w-5"} aria-hidden="true" />;
-}
-
-export function IconNat(props: IconProps) {
-  return <ArrowLeftRight class={props.class ?? "h-5 w-5"} aria-hidden="true" />;
-}
-
-export function IconAddressList(props: IconProps) {
-  return <ListChecks class={props.class ?? "h-5 w-5"} aria-hidden="true" />;
-}
-
-export function IconDhcp(props: IconProps) {
-  return <ServerCog class={props.class ?? "h-5 w-5"} aria-hidden="true" />;
-}
-
-export function IconDns(props: IconProps) {
-  return <Globe class={props.class ?? "h-5 w-5"} aria-hidden="true" />;
-}
-
-export function IconNeighbors(props: IconProps) {
-  return <Radar class={props.class ?? "h-5 w-5"} aria-hidden="true" />;
-}
-
-export function IconQueues(props: IconProps) {
-  return <ListOrdered class={props.class ?? "h-5 w-5"} aria-hidden="true" />;
-}
-
-export function IconLog(props: IconProps) {
-  return <ScrollText class={props.class ?? "h-5 w-5"} aria-hidden="true" />;
-}
+/** Sidebar groups; the command palette indexes the same list. */
+export const NAV: Array<{ title: string; items: NavItem[] }> = [
+  {
+    title: "",
+    items: [
+      { href: "/", label: "概览", icon: LayoutDashboard, keywords: "dashboard overview" },
+      { href: "/topology", label: "拓扑", icon: Share2, keywords: "topology map" },
+      { href: "/devices", label: "客户端", icon: MonitorSmartphone, keywords: "clients devices 设备" },
+      { href: "/interfaces", label: "端口", icon: Network, keywords: "ports interfaces 接口" },
+    ],
+  },
+  {
+    title: "网络",
+    items: [
+      { href: "/wifi", label: "WiFi", icon: Wifi, keywords: "wireless 无线" },
+      { href: "/routes", label: "路由", icon: Route, keywords: "routes" },
+      { href: "/dhcp", label: "DHCP", icon: ServerCog },
+      { href: "/dns", label: "DNS", icon: Globe },
+      { href: "/queues", label: "队列", icon: ListOrdered, keywords: "queue qos 限速" },
+      { href: "/neighbors", label: "邻居", icon: Radar, keywords: "neighbor lldp" },
+    ],
+  },
+  {
+    title: "安全",
+    items: [
+      { href: "/firewall", label: "防火墙", icon: ShieldCheck, keywords: "firewall filter mangle" },
+      { href: "/nat", label: "NAT", icon: ArrowLeftRight, keywords: "端口转发 dstnat" },
+      { href: "/address-lists", label: "地址列表", icon: ListChecks, keywords: "address list" },
+      { href: "/wireguard", label: "WireGuard", icon: KeyRound, keywords: "vpn wg" },
+    ],
+  },
+  {
+    title: "系统",
+    items: [
+      { href: "/log", label: "日志", icon: ScrollText, keywords: "log" },
+      { href: "/connection", label: "连接", icon: PlugZap, keywords: "connection settings 设置" },
+    ],
+  },
+];

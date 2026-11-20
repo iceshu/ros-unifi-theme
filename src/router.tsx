@@ -6,6 +6,7 @@ import { InterfacesPage } from "./pages/Interfaces";
 import { NotFoundPage } from "./pages/NotFound";
 import { OverviewPage } from "./pages/Overview";
 import { RoutesPage } from "./pages/Routes";
+import { TopologyPage } from "./pages/Topology";
 import { WireGuardPage } from "./pages/WireGuard";
 
 import { NatPage, AddressListsPage, DhcpPage, DnsPage, NeighborsPage, QueuesPage, WifiPage, LogPage } from "./pages/ReadPages";
@@ -13,6 +14,7 @@ import { NatPage, AddressListsPage, DhcpPage, DnsPage, NeighborsPage, QueuesPage
 export const Router = createRouter({
   routes: [
     { path: "/", component: OverviewPage },
+    { path: "/topology", component: TopologyPage },
     { path: "/devices", component: DevicesPage },
     { path: "/interfaces", component: InterfacesPage },
     { path: "/firewall", component: FirewallPage },

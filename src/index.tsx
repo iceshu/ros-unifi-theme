@@ -3,11 +3,13 @@ import { Errored } from "solid-js";
 import { Toasts } from "./components/Toast";
 import { Shell } from "./components/Shell";
 import { DashboardProvider } from "./lib/store";
+import { initTheme } from "./lib/theme";
 import { Router } from "./router";
 import "./index.css";
 
 const root = document.getElementById("root");
 if (!root) throw new Error("找不到页面根节点");
+initTheme();
 
 render(
   () => (
