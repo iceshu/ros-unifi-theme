@@ -1,5 +1,6 @@
 import { createEffect, createSignal, onCleanup } from "solid-js";
 import { toApiError, writeRest } from "../lib/api";
+import { showToast } from "../lib/toast";
 import { flag, type RosRecord } from "../lib/model";
 import { useDashboard } from "../lib/store";
 
@@ -34,13 +35,18 @@ export function WriteToggle(props: { path: string; row: RosRecord | undefined })
     }
     disarm();
     setBusy(true);
+    const completedAction = action();
+    const target = props.row?.name || props.row?.comment || props.row?.[".id"] || "";
     try {
       await writeRest(`${props.path}/${encodeURIComponent(props.row![".id"])}`, "PATCH", {
         disabled: disabled() ? "no" : "yes",
       });
+      showToast(`已${completedAction} ${target}`, "ok");
       dash.retry();
     } catch (error) {
-      setError(toApiError(error).message);
+      const message = toApiError(error).message;
+      setError(message);
+      showToast(message, "err");
     } finally {
       setBusy(false);
     }
@@ -51,7 +57,7 @@ export function WriteToggle(props: { path: string; row: RosRecord | undefined })
         <span ref={root} class="ml-2 inline-flex flex-wrap items-center gap-2">
           <button type="button" class={armed() ? "chip is-on text-warn" : "chip"}
             disabled={busy()} aria-label={`${props.row?.name || props.row?.comment || props.row?.[".id"]} ${action()}`}
-            onClick={click}>
+            onClick={(event) => { event.stopPropagation(); void click(); }}>
             {busy() ? "处理中…" : armed() ? `确认${action()}？` : action()}
           </button>
           {error() ? <span role="alert" class="text-xs text-bad">{error()}</span> : null}

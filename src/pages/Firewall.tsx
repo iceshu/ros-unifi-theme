@@ -1,4 +1,6 @@
 import { ArrowRight } from "@lucide/solid";
+import { createTableSort, SortHeader } from "../components/TableSort";
+import type { RosRecord } from "../lib/model";
 import { WriteToggle } from "../components/WriteToggle";
 import { createMemo, createSignal, For } from "solid-js";
 import { EmptyState, PageHeader, Pill } from "../components/ui";
@@ -9,6 +11,8 @@ import { useDashboard } from "../lib/store";
 
 export function FirewallPage() {
   const dash = useDashboard();
+  const sorting = createTableSort<{ rule: RosRecord; index: number }>();
+  const sorted = () => sorting.rows(rows(), (item, key) => key === "bytes" || key === "packets" ? num(item.rule[key]) : item.rule[key]);
   const [tab, setTab] = createSignal("filter");
   const [chain, setChain] = createSignal("all");
   const [query, setQuery] = createSignal("");
@@ -58,13 +62,17 @@ export function FirewallPage() {
             <thead>
               <tr>
                 <th>序号</th>
-                <th>规则</th>
-                <th>动作</th>
-                <th>流量</th>
+                <SortHeader column="chain" state={sorting.sort()} toggle={sorting.toggle}>规则</SortHeader>
+                <SortHeader column="action" state={sorting.sort()} toggle={sorting.toggle}>动作</SortHeader>
+                <th>
+                  <button type="button" aria-pressed={sorting.sort()?.key === "bytes" ? "true" : "false"} onClick={() => sorting.toggle("bytes")}>流量 <span aria-hidden="true">{sorting.sort()?.key === "bytes" ? (sorting.sort()?.desc ? "↓" : "↑") : "↕"}</span></button>
+                  {" / "}
+                  <button type="button" aria-pressed={sorting.sort()?.key === "packets" ? "true" : "false"} onClick={() => sorting.toggle("packets")}>包 <span aria-hidden="true">{sorting.sort()?.key === "packets" ? (sorting.sort()?.desc ? "↓" : "↑") : "↕"}</span></button>
+                </th>
               </tr>
             </thead>
             <tbody>
-              <For each={rows()} keyed={(row) => row.rule[".id"] || String(row.index)}>
+              <For each={sorted()} keyed={(row) => row.rule[".id"] || String(row.index)}>
                 {(item) => {
                   const rule = () => item().rule;
                   const matchers = () => firewallMatchers(rule());

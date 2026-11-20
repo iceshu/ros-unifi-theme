@@ -1,5 +1,6 @@
 import { render } from "@solidjs/web";
 import { Errored } from "solid-js";
+import { Toasts } from "./components/Toast";
 import { Shell } from "./components/Shell";
 import { DashboardProvider } from "./lib/store";
 import { Router } from "./router";
@@ -29,6 +30,7 @@ render(
               {props.children}
             </Errored>
           </Shell>
+          <Toasts />
         </DashboardProvider>
       )}
     </Router>

@@ -1,6 +1,8 @@
-import { createMemo, createSignal, For } from "solid-js";
+import { CopyText } from "../components/CopyText";
+import { createTableSort, SortHeader, useTableKeyboard } from "../components/TableSort";
+import { createEffect, createMemo, createSignal, For, type Accessor } from "solid-js";
 import { EmptyState, PageHeader, Pill } from "../components/ui";
-import { formatLastSeen } from "../lib/format";
+import { formatLastSeen, parseDurationSeconds } from "../lib/format";
 import { DeviceIcon } from "../components/DeviceIcon";
 import { EChart, chartColors, chartTooltip, type ChartOption } from "../components/charts";
 import { arpStatusLabel, arpStatusTone, dhcpStatusLabel, dhcpStatusTone, ipSortKey, leaseIdentity, type DeviceKind, type RosRecord } from "../lib/model";
@@ -28,6 +30,10 @@ function matches(parts: Array<string | undefined>, query: string): boolean {
 
 export function DevicesPage() {
   const dash = useDashboard();
+  let search: HTMLInputElement | undefined;
+  const escape = useTableKeyboard(() => search);
+  const sorting = createTableSort<RosRecord>();
+  const sorted = () => sorting.rows(rows(), (row, key) => key === "ip" ? ipSortKey(row.address) : key === "hostname" ? row["host-name"] || leaseIdentity(row).title : key === "seen" ? parseDurationSeconds(row["last-seen"]) : row.status);
   const [query, setQuery] = createSignal("");
   const [filter, setFilter] = createSignal<Filter>("all");
   const [kind, setKind] = createSignal<DeviceKind | null>(null);
@@ -113,6 +119,8 @@ export function DevicesPage() {
       </section>
       <div class="mb-4 flex flex-wrap items-center gap-2">
         <input
+          ref={search}
+          aria-label="搜索"
           class="field"
           type="search"
           placeholder="搜索"
@@ -132,17 +140,17 @@ export function DevicesPage() {
           <table class="data-table">
             <thead>
               <tr>
-                <th>设备</th>
-                <th>IP</th>
+                <SortHeader column="hostname" state={sorting.sort()} toggle={sorting.toggle}>设备</SortHeader>
+                <SortHeader column="ip" state={sorting.sort()} toggle={sorting.toggle}>IP</SortHeader>
                 <th>MAC</th>
-                <th>租约</th>
-                <th>最近出现</th>
+                <SortHeader column="status" state={sorting.sort()} toggle={sorting.toggle}>租约</SortHeader>
+                <SortHeader column="seen" state={sorting.sort()} toggle={sorting.toggle}>最近出现</SortHeader>
                 <th>ARP</th>
               </tr>
             </thead>
             <tbody>
-              <For each={rows()} keyed={(row) => row[".id"] || row["mac-address"] || row.address}>
-                {(row) => <LeaseRow lease={row()} arp={arpByMac().get(macKey(row()["mac-address"]))} />}
+              <For each={sorted()} keyed={(row) => row[".id"] || row["mac-address"] || row.address}>
+                {(row) => <LeaseRow lease={row()} escape={escape} arp={arpByMac().get(macKey(row()["mac-address"]))} />}
               </For>
             </tbody>
           </table>
@@ -166,10 +174,12 @@ export function DevicesPage() {
                   {(row) => (
                     <tr
                       class="cursor-pointer"
-                      onClick={() => dash.setSelection({ type: "client", ip: row().address || "", mac: row()["mac-address"] || "" })}
+                      tabindex={0}
+                      onKeyDown={(event) => { if (event.target === event.currentTarget && (event.key === "Enter" || event.key === " ")) { event.preventDefault(); dash.setSelection({ type: "client", ip: row().address || "", mac: row()["mac-address"] || "" }); } }}
+                      onClick={(event) => { event.currentTarget.focus(); dash.setSelection({ type: "client", ip: row().address || "", mac: row()["mac-address"] || "" }); }}
                     >
-                      <td class="font-mono">{row().address}</td>
-                      <td class="font-mono">{row()["mac-address"]}</td>
+                      <td class="font-mono"><CopyText value={row().address || ""} /></td>
+                      <td class="font-mono"><CopyText value={row()["mac-address"] || ""} /></td>
                       <td>{row().interface || "—"}</td>
                       <td>
                         <Pill tone={arpStatusTone(row().status)}>{arpStatusLabel(row().status)}</Pill>
@@ -186,24 +196,27 @@ export function DevicesPage() {
   );
 }
 
-function LeaseRow(props: { lease: RosRecord; arp: RosRecord | undefined }) {
+function LeaseRow(props: { lease: RosRecord; arp: RosRecord | undefined; escape: Accessor<number> }) {
   const dash = useDashboard();
   const [expanded, setExpanded] = createSignal(false);
+  createEffect(() => props.escape(), () => { setExpanded(false); });
   const identity = () => leaseIdentity(props.lease);
   return (
     <>
-    <tr class="cursor-pointer" onClick={() => dash.setSelection({ type: "client", ip: props.lease.address || "", mac: props.lease["mac-address"] || "" })}>
+    <tr class="cursor-pointer" tabindex={0}
+      onKeyDown={(event) => { if (event.target === event.currentTarget && (event.key === "Enter" || event.key === " ")) { event.preventDefault(); dash.setSelection({ type: "client", ip: props.lease.address || "", mac: props.lease["mac-address"] || "" }); } }}
+      onClick={(event) => { event.currentTarget.focus(); dash.setSelection({ type: "client", ip: props.lease.address || "", mac: props.lease["mac-address"] || "" }); }}>
       <td>
         <div class="client">
           <DeviceIcon kind={identity().kind} />
           <div class="min-w-0">
-            <button type="button" class={`client-name truncate ${identity().title === "未知" ? "text-faint" : ""}`} aria-expanded={expanded() ? "true" : "false"} onClick={(event) => { event.stopPropagation(); setExpanded(!expanded()); }}>{expanded() ? "▾" : "▸"} {identity().title}</button>
-            {identity().subtitle ? <div class="client-sub truncate">{identity().subtitle}</div> : null}
+            <button type="button" class={`client-name truncate ${identity().title === "未知" ? "text-faint" : ""}`} aria-label={identity().title} aria-expanded={expanded() ? "true" : "false"} onClick={(event) => { event.stopPropagation(); setExpanded(!expanded()); }}>{expanded() ? "▾" : "▸"}</button>{" "}<CopyText class={`client-name truncate ${identity().title === "未知" ? "text-faint" : ""}`} value={identity().title}>{identity().title}</CopyText>
+            {identity().subtitle ? <div class="client-sub truncate"><CopyText value={identity().subtitle}>{identity().subtitle}</CopyText></div> : null}
           </div>
         </div>
       </td>
-      <td class="font-mono text-xs text-muted">{props.lease.address || "—"}</td>
-      <td class="font-mono text-xs text-faint">{props.lease["mac-address"] || "—"}</td>
+      <td class="font-mono text-xs text-muted">{props.lease.address ? <CopyText value={props.lease.address} /> : "—"}</td>
+      <td class="font-mono text-xs text-faint">{props.lease["mac-address"] ? <CopyText value={props.lease["mac-address"]} /> : "—"}</td>
       <td>
         <Pill tone={dhcpStatusTone(props.lease.status)}>{dhcpStatusLabel(props.lease.status)}</Pill>
         {props.lease["expires-after"] ? (
@@ -216,7 +229,7 @@ function LeaseRow(props: { lease: RosRecord; arp: RosRecord | undefined }) {
         {props.arp?.interface ? <div class="mt-1 text-xs text-faint">{props.arp.interface}</div> : null}
       </td>
     </tr>
-    {expanded() ? <tr><td colspan={6}><h3 class="text-xs text-faint">全部字段</h3><AllFields row={props.lease} /></td></tr> : null}
+    {expanded() ? <tr><td colspan={6}><h3 class="text-xs text-faint">全部字段</h3><AllFields row={props.lease} copy /></td></tr> : null}
     </>
   );
 }

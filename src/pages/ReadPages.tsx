@@ -1,3 +1,4 @@
+import { useTableKeyboard } from "../components/TableSort";
 import { createMemo, createSignal } from "solid-js";
 import { AllFields, ReadTable } from "../components/ReadData";
 import { EmptyState, PageHeader } from "../components/ui";
@@ -44,11 +45,13 @@ export function WifiPage() {
 }
 export function LogPage() {
   const dash = useDashboard();
+  let search: HTMLInputElement | undefined;
+  useTableKeyboard(() => search);
   const [query, setQuery] = createSignal("");
   const rows = createMemo(() => dash.logEntries().slice(-200).filter((row) =>
     [row.time, row.topics, row.message].join(" ").toLowerCase().includes(query().trim().toLowerCase())));
   return <div><PageHeader title="日志" /><p class="mb-2 text-xs text-faint">最近 200 条</p>
-    <input class="field mb-4" type="search" aria-label="搜索日志" placeholder="搜索日志" value={query()} onInput={(event) => setQuery(event.currentTarget.value)} />
+    <input ref={search} class="field mb-4" type="search" aria-label="搜索日志" placeholder="搜索日志" value={query()} onInput={(event) => setQuery(event.currentTarget.value)} />
     <ReadTable rows={rows()} fields={["time", "topics", "message"]} />
   </div>;
 }

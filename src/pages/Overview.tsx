@@ -1,3 +1,4 @@
+import { Skeleton } from "../components/ui";
 import { createMemo } from "solid-js";
 import { ReadTable } from "../components/ReadData";
 import { ThroughputChart } from "../components/Chart";
@@ -143,25 +144,27 @@ export function OverviewPage() {
 }
 
 function Stat(props: { label: string; value: string; hint?: string; percent?: number | null }) {
+  const dash = useDashboard();
   return (
     <div class="min-w-0">
       <div class="kicker">{props.label}</div>
-      <div class="mt-1 truncate text-xl font-medium tabular-nums">{props.value}</div>
-      {props.percent != null ? (
+      {!dash.ready() ? <div class="mt-1" aria-busy="true"><Skeleton class="h-7 w-24" /><Skeleton class="mt-2 h-3 w-32" /></div> : <div class="mt-1 truncate text-xl font-medium tabular-nums">{props.value}</div>}
+      {dash.ready() && props.percent != null ? (
         <div class="meter mt-2">
           <i style={{ width: `${Math.max(0, Math.min(100, props.percent))}%` }} />
         </div>
       ) : null}
-      {props.hint ? <div class="mt-1 truncate text-xs text-faint">{props.hint}</div> : null}
+      {dash.ready() && props.hint ? <div class="mt-1 truncate text-xs text-faint">{props.hint}</div> : null}
     </div>
   );
 }
 
 function Fact(props: { label: string; value: string }) {
+  const dash = useDashboard();
   return (
     <div class="min-w-0">
       <div class="kicker">{props.label}</div>
-      <div class="mt-1 truncate font-mono text-xs">{props.value}</div>
+      {!dash.ready() ? <Skeleton class="mt-1 h-4 w-32" /> : <div class="mt-1 truncate font-mono text-xs">{props.value}</div>}
     </div>
   );
 }
