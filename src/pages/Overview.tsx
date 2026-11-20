@@ -1,6 +1,7 @@
 import { createMemo } from "solid-js";
 import { ReadTable } from "../components/ReadData";
 import { ThroughputChart } from "../components/Chart";
+import { UsageGauge } from "../components/charts";
 import { TopologyMap } from "../components/TopologyMap";
 import { displayArch, formatBps, formatBytes, formatUptime } from "../lib/format";
 import {
@@ -81,6 +82,19 @@ export function OverviewPage() {
           <div class="text-xs text-faint">{wanName()}</div>
         </div>
         <ThroughputChart points={history()} now={dash.now()} />
+      </section>
+
+      <section class="grid gap-3 sm:grid-cols-2">
+        <div class="card px-4 py-3">
+          <h2 class="text-sm font-medium">CPU 使用率</h2>
+          <UsageGauge value={cpu()} label="CPU 使用率" />
+          <p class="truncate text-center text-xs text-faint">{cleanCpu(dash.resource()?.cpu)}</p>
+        </div>
+        <div class="card px-4 py-3">
+          <h2 class="text-sm font-medium">内存使用率</h2>
+          <UsageGauge value={memory()?.percent ?? null} label="内存使用率" />
+          <p class="text-center text-xs text-faint">{memory() ? `${formatBytes(memory()!.used)} / ${formatBytes(memory()!.total)}` : ""}</p>
+        </div>
       </section>
 
       <section class="grid gap-3 lg:grid-cols-5">

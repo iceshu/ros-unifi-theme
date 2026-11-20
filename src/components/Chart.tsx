@@ -1,115 +1,63 @@
 import { createMemo } from "solid-js";
+import { graphic } from "echarts/core";
 import { formatBps } from "../lib/format";
 import { HISTORY_WINDOW_MS, type HistoryPoint } from "../lib/store";
+import { EChart, chartColors, chartTooltip, type ChartOption } from "./charts";
 
-const WIDTH = 960;
-const HEIGHT = 220;
-const PAD = { l: 64, r: 12, t: 12, b: 26 };
-const FLOOR_BPS = 1_000_000;
-
-function niceMax(value: number): number {
-  if (value <= 1) return 1;
-  const pow = 10 ** Math.floor(Math.log10(value));
-  const n = value / pow;
-  const nice = n <= 1 ? 1 : n <= 2 ? 2 : n <= 5 ? 5 : 10;
-  return nice * pow;
-}
-
-function clamp(value: number, min: number, max: number): number {
-  return Math.max(min, Math.min(max, value));
-}
-
-function smooth(points: Array<{ x: number; y: number }>, minY: number, maxY: number): string {
-  if (points.length === 0) return "";
-  let d = `M ${points[0].x.toFixed(1)} ${points[0].y.toFixed(1)}`;
-  for (let i = 0; i < points.length - 1; i += 1) {
-    const p0 = points[i - 1] ?? points[i];
-    const p1 = points[i];
-    const p2 = points[i + 1];
-    const p3 = points[i + 2] ?? p2;
-    const c1x = p1.x + (p2.x - p0.x) / 6;
-    const c1y = clamp(p1.y + (p2.y - p0.y) / 6, minY, maxY);
-    const c2x = p2.x - (p3.x - p1.x) / 6;
-    const c2y = clamp(p2.y - (p3.y - p1.y) / 6, minY, maxY);
-    d += ` C ${c1x.toFixed(1)} ${c1y.toFixed(1)}, ${c2x.toFixed(1)} ${c2y.toFixed(1)}, ${p2.x.toFixed(1)} ${p2.y.toFixed(1)}`;
-  }
-  return d;
-}
-
-function tickLabel(value: number): string {
+function bpsLabel(value: number): string {
   const formatted = formatBps(value);
-  if (!formatted) return "0";
-  return `${formatted.value} ${formatted.unit}`;
+  return formatted ? `${formatted.value} ${formatted.unit}` : "—";
 }
 
 export function ThroughputChart(props: { points: HistoryPoint[]; now: number }) {
-  const geometry = createMemo(() => {
+  const option = createMemo<ChartOption>(() => {
     const now = props.now;
     const start = now - HISTORY_WINDOW_MS;
     const points = props.points.filter((point) => point.t >= start && point.t <= now + 1000);
-    const peak = points.reduce((max, point) => Math.max(max, point.rxBps, point.txBps), 0);
-    const max = niceMax(Math.max(peak * 1.12, FLOOR_BPS));
-    const innerW = WIDTH - PAD.l - PAD.r;
-    const innerH = HEIGHT - PAD.t - PAD.b;
-    const x = (t: number) => PAD.l + ((t - start) / HISTORY_WINDOW_MS) * innerW;
-    const y = (value: number) => PAD.t + (1 - Math.min(Math.max(value, 0), max) / max) * innerH;
-    const down = points.map((point) => ({ x: x(point.t), y: y(point.rxBps) }));
-    const up = points.map((point) => ({ x: x(point.t), y: y(point.txBps) }));
-    const base = HEIGHT - PAD.b;
-    const downLine = smooth(down, PAD.t, base);
-    const upLine = smooth(up, PAD.t, base);
-    const area = (line: string, series: Array<{ x: number }>) =>
-      series.length < 2 ? "" : `${line} L ${series[series.length - 1].x.toFixed(1)} ${base} L ${series[0].x.toFixed(1)} ${base} Z`;
+    const timeLabel = (t: number) => {
+      const minutes = Math.max(0, (now - t) / 60000);
+      return minutes < 0.1 ? "现在" : `-${Number(minutes.toFixed(1))}分`;
+    };
     return {
-      ticks: [max, max / 2, 0].map((value) => ({ y: y(value), label: tickLabel(value) })),
-      times: [0, 0.5, 1].map((fraction) => {
-      const minutes = HISTORY_WINDOW_MS / 60000;
-      const ago = (1 - fraction) * minutes;
-      return {
-        x: PAD.l + fraction * innerW,
-        label: fraction === 1 ? "现在" : `-${Number.isInteger(ago) ? ago : ago.toFixed(1)}分`,
-      };
-    }),
-      downLine,
-      upLine,
-      downArea: area(downLine, down),
-      upArea: area(upLine, up),
-      down,
-      up,
+      color: [chartColors.download, chartColors.upload],
+      textStyle: { color: chartColors.muted, fontFamily: "Inter, sans-serif" },
+      animationDuration: 400, animationDurationUpdate: 350, animationEasingUpdate: "cubicOut",
+      grid: { left: 82, right: 24, top: 40, bottom: 32 },
+      legend: { data: ["下载", "上传"], top: 0, right: 12, textStyle: { color: chartColors.muted } },
+      tooltip: {
+        ...chartTooltip, trigger: "axis", axisPointer: { type: "cross", label: { backgroundColor: chartColors.muted } },
+        formatter: (params) => {
+          const items = Array.isArray(params) ? params : [params];
+          const first = items[0];
+          if (!first || !Array.isArray(first.value)) return "";
+          return [timeLabel(Number(first.value[0])), ...items.map((item) =>
+            `${item.marker ?? ""}${item.seriesName}：${bpsLabel(Number(Array.isArray(item.value) ? item.value[1] : item.value))}`,
+          )].join("<br/>");
+        },
+      },
+      xAxis: {
+        type: "time", min: start, max: now, splitNumber: 5,
+        axisLine: { lineStyle: { color: chartColors.grid } }, axisTick: { show: false },
+        axisLabel: { color: chartColors.muted, formatter: timeLabel, hideOverlap: true, showMaxLabel: true },
+        axisPointer: { label: { formatter: (params) => timeLabel(Number(params.value)) } },
+        splitLine: { show: false },
+      },
+      yAxis: {
+        type: "value", min: 0, max: (extent) => Math.max(1_000_000, extent.max * 1.12), splitNumber: 3,
+        axisLabel: { color: chartColors.muted, formatter: bpsLabel },
+        axisPointer: { label: { formatter: (params) => bpsLabel(Number(params.value)) } },
+        splitLine: { lineStyle: { color: chartColors.grid } },
+      },
+      series: ([
+        ["下载", "rxBps", chartColors.download, "rgba(0,111,255,0.22)", "rgba(0,111,255,0.02)"],
+        ["上传", "txBps", chartColors.upload, "rgba(31,191,117,0.16)", "rgba(31,191,117,0)"],
+      ] as const).map(([name, key, color, top, bottom]) => ({
+        name, type: "line", smooth: true, showSymbol: points.length === 1, symbolSize: 5,
+        lineStyle: { width: 2, color }, itemStyle: { color },
+        areaStyle: { color: new graphic.LinearGradient(0, 0, 0, 1, [{ offset: 0, color: top }, { offset: 1, color: bottom }]) },
+        data: points.map((point) => [point.t, point[key]]),
+      })),
     };
   });
-
-  return (
-    <svg viewBox={`0 0 ${WIDTH} ${HEIGHT}`} class="h-64 w-full" role="img" aria-label="吞吐曲线">
-      <defs>
-        <linearGradient id="wan-down" x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0%" stop-color="#006fff" stop-opacity="0.2" />
-          <stop offset="100%" stop-color="#006fff" stop-opacity="0.02" />
-        </linearGradient>
-        <linearGradient id="wan-up" x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0%" stop-color="#1fbf75" stop-opacity="0.14" />
-          <stop offset="100%" stop-color="#1fbf75" stop-opacity="0" />
-        </linearGradient>
-      </defs>
-      {geometry().ticks.map((tick) => (
-        <g>
-          <line x1={PAD.l} x2={WIDTH - PAD.r} y1={tick.y} y2={tick.y} stroke="#e3e8ef" />
-          <text x="0" y={tick.y + 4} fill="#66788a" font-size="11">
-            {tick.label}
-          </text>
-        </g>
-      ))}
-      {geometry().times.map((tick) => (
-        <text x={tick.x} y={HEIGHT - 6} fill="#66788a" font-size="11" text-anchor={tick.label === "现在" ? "end" : "start"}>
-          {tick.label}
-        </text>
-      ))}
-      {geometry().downArea ? <path d={geometry().downArea} fill="url(#wan-down)" /> : null}
-      {geometry().upArea ? <path d={geometry().upArea} fill="url(#wan-up)" /> : null}
-      {geometry().down.length > 1 ? (
-        <path d={geometry().downLine} fill="none" stroke="#006fff" stroke-width="2" />
-      ) : null}
-      {geometry().up.length > 1 ? <path d={geometry().upLine} fill="none" stroke="#1fbf75" stroke-width="2" /> : null}
-    </svg>
-  );
+  return <EChart option={option()} />;
 }

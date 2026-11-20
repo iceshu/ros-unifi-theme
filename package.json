@@ -18,6 +18,7 @@
     "@lucide/solid": "1.76.0",
     "@solidjs/router": "^2.0.0",
     "@solidjs/web": "^2.0.3",
+    "echarts": "^6.1.0",
     "solid-js": "^2.0.3"
   },
   "devDependencies": {
