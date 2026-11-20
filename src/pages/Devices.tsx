@@ -2,9 +2,15 @@ import { createMemo, createSignal, For } from "solid-js";
 import { EmptyState, PageHeader, Pill } from "../components/ui";
 import { formatLastSeen } from "../lib/format";
 import { DeviceIcon } from "../components/DeviceIcon";
-import { arpStatusLabel, arpStatusTone, dhcpStatusLabel, dhcpStatusTone, ipSortKey, leaseIdentity, type RosRecord } from "../lib/model";
+import { EChart, chartColors, chartTooltip, type ChartOption } from "../components/charts";
+import { arpStatusLabel, arpStatusTone, dhcpStatusLabel, dhcpStatusTone, ipSortKey, leaseIdentity, type DeviceKind, type RosRecord } from "../lib/model";
 import { AllFields } from "../components/ReadData";
 import { useDashboard } from "../lib/store";
+
+const KIND_LABELS: Record<DeviceKind, string> = {
+  phone: "手机 / 平板", laptop: "笔记本", server: "服务器", nas: "网络存储", ap: "无线接入点",
+  camera: "摄像头", tv: "电视", console: "游戏主机", speaker: "音箱", printer: "打印机", generic: "其他设备",
+};
 
 type Filter = "all" | "bound" | "idle" | "reachable";
 
@@ -24,6 +30,35 @@ export function DevicesPage() {
   const dash = useDashboard();
   const [query, setQuery] = createSignal("");
   const [filter, setFilter] = createSignal<Filter>("all");
+  const [kind, setKind] = createSignal<DeviceKind | null>(null);
+  const distribution = createMemo(() => {
+    const counts = new Map<DeviceKind, number>();
+    for (const lease of dash.leases()) {
+      const key = leaseIdentity(lease).kind;
+      counts.set(key, (counts.get(key) ?? 0) + 1);
+    }
+    return [...counts].sort((a, b) => b[1] - a[1]);
+  });
+  const donutOption = createMemo<ChartOption>(() => ({
+    color: [chartColors.download, chartColors.upload, chartColors.warn, chartColors.bad, chartColors.muted],
+    tooltip: { ...chartTooltip, trigger: "item", formatter: "{b}：{c} 台（{d}%）" },
+    legend: { type: "scroll", bottom: 0, textStyle: { color: chartColors.muted } },
+    series: [{
+      type: "pie", radius: ["45%", "70%"], center: ["50%", "43%"],
+      label: { show: false },
+      itemStyle: { borderColor: chartColors.background, borderWidth: 3, borderRadius: 5 },
+      emphasis: { label: { show: true, formatter: "{b}\n{c} 台", color: chartColors.ink } },
+      data: distribution().map(([key, value]) => ({
+        name: KIND_LABELS[key], value,
+        itemStyle: { opacity: kind() && kind() !== key ? 0.35 : 1 },
+      })),
+      animationDurationUpdate: 350,
+    }],
+  }));
+  const selectKind = (name: string) => {
+    const key = distribution().find(([key]) => KIND_LABELS[key] === name)?.[0];
+    if (key) setKind(kind() === key ? null : key);
+  };
   const arpByMac = createMemo(() => {
     const map = new Map<string, RosRecord>();
     for (const row of dash.arp()) {
@@ -38,6 +73,7 @@ export function DevicesPage() {
       .leases()
       .filter((lease) => {
         const arp = arpByMac().get(macKey(lease["mac-address"]));
+        if (kind() && leaseIdentity(lease).kind !== kind()) return false;
         if (mode === "bound" && lease.status !== "bound") return false;
         if (mode === "idle" && lease.status === "bound") return false;
         if (mode === "reachable" && arp?.status !== "reachable") return false;
@@ -68,6 +104,13 @@ export function DevicesPage() {
           {boundCount()} 在线 / {dash.leases().length}
         </div>
       </PageHeader>
+      <section class="card mb-4 px-4 py-3">
+        <div class="flex flex-wrap items-center justify-between gap-2">
+          <h2 class="text-sm font-medium">设备类型分布</h2>
+          <span class="text-xs text-faint">点击类型筛选，再次点击取消</span>
+        </div>
+        <EChart option={donutOption()} height={260} onClick={selectKind} />
+      </section>
       <div class="mb-4 flex flex-wrap items-center gap-2">
         <input
           class="field"
@@ -76,7 +119,8 @@ export function DevicesPage() {
           value={query()}
           onInput={(event) => setQuery(event.currentTarget.value)}
         />
-        <FilterChip label="全部" on={filter() === "all"} click={() => setFilter("all")} />
+        <FilterChip label="全部" on={filter() === "all" && kind() === null} click={() => { setFilter("all"); setKind(null); }} />
+        {kind() ? <FilterChip label={`${KIND_LABELS[kind()!]} ×`} on={true} click={() => setKind(null)} /> : null}
         <FilterChip label="已绑定" on={filter() === "bound"} click={() => setFilter("bound")} />
         <FilterChip label="未绑定" on={filter() === "idle"} click={() => setFilter("idle")} />
         <FilterChip label="ARP 可达" on={filter() === "reachable"} click={() => setFilter("reachable")} />
