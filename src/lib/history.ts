@@ -1,4 +1,5 @@
-import { createEffect, createMemo, createSignal, type Accessor } from "solid-js";
+import { createEffect, createMemo, createSignal } from "solid-js";
+import { type Accessor } from "solid-js";
 import { requestJson, toApiError } from "./api";
 import { useDashboard, type HistoryPoint } from "./store";
 
@@ -7,6 +8,8 @@ export const RANGES = [
   { seconds: 3600, label: "1 小时" },
   { seconds: 21600, label: "6 小时" },
   { seconds: 86400, label: "24 小时" },
+  { seconds: 604800, label: "7 天" },
+  { seconds: 2592000, label: "30 天" },
 ] as const;
 
 export interface InterfaceHistory {
@@ -30,13 +33,15 @@ function parsePoints(data: unknown): HistoryPoint[] {
 function refreshMs(range: number): number {
   if (range <= 300) return 5_000;
   if (range <= 3600) return 15_000;
-  return 60_000;
+  if (range <= 86400) return 60_000;
+  if (range <= 604800) return 300_000;
+  return 600_000;
 }
 
 /**
- * Throughput series for one interface: server history (/api/history) when the
- * proxy has it, with fresh 2 s browser samples appended for short ranges.
- * Falls back to browser-only samples when the server sampler is disabled.
+ * Throughput series for one interface. For ranges ≤ 24 h: server history
+ * (/api/history) with live browser samples appended. For 7 d / 30 d: the
+ * long-term DB endpoint (/api/history/long) only.
  */
 export function useInterfaceHistory(
   name: Accessor<string | null | undefined>,
@@ -53,20 +58,26 @@ export function useInterfaceHistory(
       const key = `${iface}:${seconds}`;
       let stopped = false;
       let timer: number | undefined;
+      const isLong = seconds > 86400;
       const load = async () => {
         try {
-          const points = parsePoints(
-            await requestJson(`/api/history?name=${encodeURIComponent(iface)}&range=${seconds}`),
-          );
+          const url = isLong
+            ? `/api/history/long?name=${encodeURIComponent(iface)}&range=${seconds}`
+            : `/api/history?name=${encodeURIComponent(iface)}&range=${seconds}`;
+          const points = parsePoints(await requestJson(url));
           if (stopped) return;
           setServer({ key, points });
         } catch (error) {
-          if (toApiError(error).status === 404) {
+          if (!isLong && toApiError(error).status === 404) {
             setDisabled(true);
             return;
           }
         }
-        if (!stopped) timer = window.setTimeout(load, document.hidden ? refreshMs(seconds) * 3 : refreshMs(seconds));
+        if (!stopped)
+          timer = window.setTimeout(
+            load,
+            document.hidden ? refreshMs(seconds) * 3 : refreshMs(seconds),
+          );
       };
       void load();
       return () => {
@@ -79,10 +90,13 @@ export function useInterfaceHistory(
   const points = createMemo<HistoryPoint[]>(() => {
     const iface = name() || "";
     const seconds = range();
+    const isLong = seconds > 86400;
     const live = iface ? (dash.history()[iface] ?? []) : [];
     const remote = server();
-    if (disabled() || !remote || remote.key !== `${iface}:${seconds}`) return live;
-    if (seconds > 3600 || remote.points.length === 0) return remote.points;
+    if (disabled() || !remote || remote.key !== `${iface}:${seconds}`) {
+      return isLong ? [] : live;
+    }
+    if (isLong || seconds > 3600 || remote.points.length === 0) return remote.points;
     const last = remote.points[remote.points.length - 1].t;
     return remote.points.concat(live.filter((point) => point.t > last));
   });

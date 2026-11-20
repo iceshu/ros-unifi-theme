@@ -1,5 +1,6 @@
 import { render, type JSX } from "@solidjs/web";
 import { Errored, onSettled, Show, createSignal } from "solid-js";
+import { GlobalConfirm } from "./components/form";
 import { Toasts } from "./components/Toast";
 import { Shell } from "./components/Shell";
 import { getSession, LOGGED_OUT_EVENT } from "./lib/api";
@@ -78,6 +79,7 @@ render(
             </DashboardProvider>
           </AuthGate>
           <Toasts />
+          <GlobalConfirm />
         </>
       )}
     </Router>

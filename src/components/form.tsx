@@ -3,6 +3,7 @@ import { Portal, type JSX } from "@solidjs/web";
 import { createSignal, For, onSettled, Show, type ParentProps } from "solid-js";
 import { flag, type RosRecord } from "../lib/model";
 import { runWrite } from "../lib/mutate";
+import { pendingConfirm } from "../lib/confirm";
 import { ros } from "../lib/api";
 import { can } from "../lib/session";
 import { useDashboard } from "../lib/store";
@@ -95,14 +96,18 @@ export function ConfirmDialog(props: {
   typeToConfirm?: string;
   onClose: () => void;
   onConfirm: () => Promise<boolean>;
+  /** Set only by GlobalConfirm: the server-requested confirmation shown on top of a page dialog. */
+  serverLayer?: boolean;
 }) {
   const [busy, setBusy] = createSignal(false);
   const [typed, setTyped] = createSignal("");
+  // A page dialog whose action triggered a server confirmation steps aside until it is answered.
+  const covered = () => !props.serverLayer && pendingConfirm() !== null;
   let confirmButton!: HTMLButtonElement;
   onSettled(() => {
     if (!props.typeToConfirm) confirmButton.focus();
     const keydown = (event: KeyboardEvent) => {
-      if (event.key === "Escape" && !busy()) {
+      if (event.key === "Escape" && !busy() && !covered()) {
         event.stopPropagation();
         props.onClose();
       }
@@ -113,7 +118,7 @@ export function ConfirmDialog(props: {
   const ready = () => !props.typeToConfirm || typed().trim() === props.typeToConfirm;
   return (
     <Portal>
-    <div class="palette-backdrop modal-layer" onClick={() => !busy() && props.onClose()}>
+    <div class="palette-backdrop modal-layer" style={covered() ? { display: "none" } : undefined} onClick={() => !busy() && props.onClose()}>
       <div class="confirm" role="alertdialog" aria-modal="true" aria-label={props.title} onClick={(event) => event.stopPropagation()}>
         <div class="flex gap-3">
           <span class={`confirm-icon ${props.danger ? "is-danger" : ""}`}>
@@ -155,6 +160,28 @@ export function ConfirmDialog(props: {
       </div>
     </div>
     </Portal>
+  );
+}
+
+/** Renders confirmations requested imperatively via askConfirm() (e.g. the server's lockout guard). */
+export function GlobalConfirm() {
+  return (
+    <Show when={pendingConfirm()} keyed>
+      {(pending) => (
+        <ConfirmDialog
+          title={pending.title}
+          message={pending.message}
+          confirmLabel="仍然继续"
+          danger
+          serverLayer
+          onClose={() => pending.resolve(false)}
+          onConfirm={async () => {
+            pending.resolve(true);
+            return true;
+          }}
+        />
+      )}
+    </Show>
   );
 }
 

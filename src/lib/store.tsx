@@ -128,6 +128,8 @@ export interface DashboardApi {
   retry: () => void;
   /** Re-read every menu now (after a change), not just interface counters. */
   refresh: () => void;
+  /** Increments on every refresh(); page-level loaders (useRos) re-fetch when it changes. */
+  refreshTick: Accessor<number>;
 }
 
 const DashboardContext = createContext<DashboardApi>();
@@ -470,9 +472,11 @@ export function createDashboard(): DashboardApi {
     wake();
   }
 
+  const [refreshTick, setRefreshTick] = createSignal(0);
   function refresh() {
     forceSlow = true;
     hurry = true;
+    setRefreshTick((value) => value + 1);
     wake();
   }
 
@@ -573,6 +577,7 @@ export function createDashboard(): DashboardApi {
     clients,
     retry,
     refresh,
+    refreshTick,
   };
 }
 

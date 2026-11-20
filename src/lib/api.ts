@@ -75,13 +75,34 @@ export async function requestJson(path: string, init: RequestInit = {}): Promise
   return payload;
 }
 
-function sendJson(path: string, method: string, body?: Record<string, unknown>): Promise<unknown> {
-  return requestJson(path, {
-    method,
-    headers: body === undefined ? {} : { "Content-Type": "application/json" },
-    body: body === undefined ? undefined : JSON.stringify(body),
-  });
+/**
+ * Set while a guarded change is re-sent after the user confirmed it; the
+ * server's lockout guard then lets "confirm_required" changes through.
+ */
+let confirmedDepth = 0;
+
+export async function withConfirmed<T>(op: () => Promise<T>): Promise<T> {
+  confirmedDepth += 1;
+  try {
+    return await op();
+  } finally {
+    confirmedDepth -= 1;
+  }
 }
+
+function sendJson(path: string, method: string, body?: Record<string, unknown>): Promise<unknown> {
+  const headers: Record<string, string> = body === undefined ? {} : { "Content-Type": "application/json" };
+  if (confirmedDepth > 0) headers["X-Rut-Confirm"] = "1";
+  return requestJson(path, { method, headers, body: body === undefined ? undefined : JSON.stringify(body) });
+}
+
+/** Dashboard feature endpoints under /api (alerts, backups, tools, …). */
+export const api = {
+  get: (path: string) => requestJson(path),
+  post: (path: string, body: Record<string, unknown> = {}) => sendJson(path, "POST", body),
+  put: (path: string, body: Record<string, unknown>) => sendJson(path, "PUT", body),
+  delete: (path: string) => sendJson(path, "DELETE"),
+};
 
 export function getMeta(): Promise<Meta> {
   return requestJson("/api/meta") as Promise<Meta>;

@@ -236,7 +236,7 @@ function baseBody(pathname, nowMs) {
     case "/rest/ppp/active":
       return [{ ".id": "*1", name: "home-vpn", service: "l2tp", "caller-id": "198.51.100.20", address: "192.168.90.10", uptime: rosUptime(nowMs) }];
     case "/rest/system/package":
-      return [{ ".id": "*1", name: "routeros", version: "7.20.4", disabled: "false" }, { ".id": "*2", name: "wifi-qcom", version: "7.20.4", disabled: "false" }];
+      return [{ ".id": "*1", name: "routeros", version: "7.16.2", disabled: "false" }, { ".id": "*2", name: "wifi-qcom", version: "7.16.2", disabled: "false" }];
     case "/rest/log":
       return [{ time: new Date(nowMs - 60000).toISOString(), topics: "dhcp,info", message: "dhcp-lan assigned 192.168.2.100 to 02:CA:FE:12:34:56" }, { time: new Date(nowMs).toISOString(), topics: "system,info", message: "Demo dashboard: read-only connection active" }];
     case "/rest/system/resource": {
@@ -518,7 +518,7 @@ function baseBody(pathname, nowMs) {
         },
       ];
     default:
-      return null;
+      return extraBodies.has(pathname) ? extraBodies.get(pathname)(nowMs) : null;
   }
 }
 
@@ -603,9 +603,34 @@ const TABLE_MENUS = new Set([
   "/rest/interface/wifi/configuration",
   "/rest/interface/wifi/security",
   "/rest/interface/wireguard/peers",
+  "/rest/interface/bridge",
+  "/rest/interface/bridge/port",
+  "/rest/interface/vlan",
+  "/rest/interface/list",
+  "/rest/interface/list/member",
+  "/rest/interface/pppoe-client",
+  "/rest/ip/address",
+  "/rest/ip/route",
 ]);
 /** Single-object menus changed with POST …/set. */
 const SINGLETONS = new Set(["/rest/ip/dns", "/rest/system/identity"]);
+
+/* Feature modules register demo data for the menus they add (see server/app.mjs). */
+const extraBodies = new Map();
+
+/**
+ * Demo body for a read path. `kind: "table"` makes the menu writable
+ * (add/set/remove/move) on an in-memory copy; `kind: "singleton"` accepts POST …/set.
+ * @param {string} pathname
+ * @param {(nowMs: number) => unknown} body
+ * @param {{ kind?: "table" | "singleton", defaults?: Record<string, string> }} [options]
+ */
+export function registerDemo(pathname, body, { kind, defaults } = {}) {
+  extraBodies.set(pathname, body);
+  if (kind === "table") TABLE_MENUS.add(pathname);
+  if (kind === "singleton") SINGLETONS.add(pathname);
+  if (defaults) DEFAULTS[pathname] = { disabled: "false", ...defaults };
+}
 
 const tables = new Map();
 const singletonPatch = new Map();

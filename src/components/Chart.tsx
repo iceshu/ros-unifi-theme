@@ -14,9 +14,22 @@ function bpsLabel(value: number): string {
 
 const pad = (value: number) => String(value).padStart(2, "0");
 
-function clock(t: number, seconds: boolean): string {
-  const date = new Date(t);
-  return `${pad(date.getHours())}:${pad(date.getMinutes())}${seconds ? `:${pad(date.getSeconds())}` : ""}`;
+
+function axisTimeLabel(t: number, range: number): string {
+  const d = new Date(t);
+  const h = pad(d.getHours()), m = pad(d.getMinutes());
+  if (range > 86400 * 2) return `${pad(d.getMonth() + 1)}/${pad(d.getDate())}`;
+  if (range > 86400) return `${pad(d.getMonth() + 1)}/${pad(d.getDate())} ${h}:${m}`;
+  if (range <= 600) return `${h}:${m}:${pad(d.getSeconds())}`;
+  return `${h}:${m}`;
+}
+
+function tooltipTimeLabel(t: number, range: number): string {
+  const d = new Date(t);
+  const h = pad(d.getHours()), m = pad(d.getMinutes()), s = pad(d.getSeconds());
+  if (range > 86400) return `${pad(d.getMonth() + 1)}/${pad(d.getDate())} ${h}:${m}`;
+  if (range <= 600) return `${h}:${m}:${s}`;
+  return `${h}:${m}`;
 }
 
 /** Canvas fillStyle cannot take color-mix(); expand #rrggbb to rgba(). */
@@ -34,7 +47,7 @@ export function ThroughputChart(props: { points: HistoryPoint[]; now: number; ra
     const now = props.now;
     const start = now - props.range * 1000;
     const points = props.points.filter((point) => point.t >= start && point.t <= now + 2000);
-    const withSeconds = props.range <= 600;
+    const range = props.range;
     const fade = (color: string, top: number) =>
       new graphic.LinearGradient(0, 0, 0, 1, [
         { offset: 0, color: alpha(color, top) },
@@ -60,7 +73,7 @@ export function ThroughputChart(props: { points: HistoryPoint[]; now: number; ra
           const first = items[0];
           if (!first || !Array.isArray(first.value)) return "";
           return [
-            `<div style="margin-bottom:4px;color:${colors.muted}">${clock(Number(first.value[0]), true)}</div>`,
+            `<div style="margin-bottom:4px;color:${colors.muted}">${tooltipTimeLabel(Number(first.value[0]), range)}</div>`,
             ...items.map(
               (item) =>
                 `${item.marker ?? ""}${item.seriesName}　<b>${bpsLabel(Number(Array.isArray(item.value) ? item.value[1] : item.value))}</b>`,
@@ -75,7 +88,7 @@ export function ThroughputChart(props: { points: HistoryPoint[]; now: number; ra
         splitNumber: (props.height ?? 260) < 200 ? 3 : 6,
         axisLine: { lineStyle: { color: colors.grid } },
         axisTick: { show: false },
-        axisLabel: { color: colors.faint, formatter: (value: number) => clock(value, withSeconds), hideOverlap: true },
+        axisLabel: { color: colors.faint, formatter: (value: number) => axisTimeLabel(value, range), hideOverlap: true },
         splitLine: { show: false },
       },
       yAxis: {

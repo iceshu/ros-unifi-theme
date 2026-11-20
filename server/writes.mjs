@@ -114,42 +114,47 @@ function fail(status, code, message) {
  * @param {string} method PUT | PATCH | DELETE | POST
  * @param {string} pathname normalized /rest/... path (no query)
  * @param {unknown} body parsed JSON body (ignored for DELETE)
+ * @param {typeof WRITE_MENUS} [menus] allowlist (core menus plus feature additions)
  * @returns {{ ok: true; policy: string; body: string | undefined; menu: string; op: string } | { ok: false; status: number; code: string; message: string }}
  */
-export function validateWrite(method, pathname, body) {
+export function validateWrite(method, pathname, body, menus = WRITE_MENUS) {
   let menu = "";
   let op = "";
   let allowed = [];
   if (method === "PUT") {
     menu = pathname;
     op = "create";
-    allowed = WRITE_MENUS[menu]?.create ?? null;
+    allowed = menus[menu]?.create ?? null;
   } else if (method === "PATCH" || method === "DELETE") {
     const slash = pathname.lastIndexOf("/");
     const id = pathname.slice(slash + 1);
     menu = pathname.slice(0, slash);
     if (!ID.test(id)) return fail(403, "forbidden_path", "写操作只能指向带 ID 的记录。");
     op = method === "PATCH" ? "update" : "remove";
-    allowed = method === "PATCH" ? WRITE_MENUS[menu]?.update ?? null : WRITE_MENUS[menu]?.remove ? [] : null;
+    allowed = method === "PATCH" ? menus[menu]?.update ?? null : menus[menu]?.remove ? [] : null;
   } else if (method === "POST") {
     const slash = pathname.lastIndexOf("/");
     menu = pathname.slice(0, slash);
     op = pathname.slice(slash + 1);
-    allowed = WRITE_MENUS[menu]?.commands?.[op] ?? null;
+    allowed = menus[menu]?.commands?.[op] ?? null;
   } else {
     return fail(405, "method_not_allowed", "不支持这个请求方法。");
   }
   if (!allowed) return fail(403, "forbidden_path", "仪表不允许修改这个菜单。");
-  const policy = WRITE_MENUS[menu].policy ?? "write";
+  const policy = menus[menu].commandPolicy?.[op] ?? menus[menu].policy ?? "write";
   if (method === "DELETE") return { ok: true, policy, body: undefined, menu, op };
 
   if (!body || typeof body !== "object" || Array.isArray(body)) return fail(400, "bad_body", "请求体必须是 JSON 对象。");
   const out = {};
+  // Script sources and scheduler events are multi-line RouterOS code; everything else is one line.
+  const multiline = menus[menu].multiline ?? [];
+  const maxValue = menus[menu].maxValue ?? MAX_VALUE;
   for (const [key, raw] of Object.entries(body)) {
     if (!allowed.includes(key)) return fail(400, "bad_field", `不允许修改字段 ${key}。`);
     if (raw !== null && typeof raw === "object") return fail(400, "bad_value", `字段 ${key} 必须是字符串。`);
     const value = raw == null ? "" : String(raw);
-    if (value.length > MAX_VALUE || /[\x00-\x08\x0a-\x1f\x7f]/.test(value)) return fail(400, "bad_value", `字段 ${key} 的值无效。`);
+    const control = multiline.includes(key) ? /[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/ : /[\x00-\x08\x0a-\x1f\x7f]/;
+    if (value.length > maxValue || control.test(value)) return fail(400, "bad_value", `字段 ${key} 的值无效。`);
     if (ID_FIELDS.has(key) && value !== "" && !value.split(",").every((part) => ID.test(part))) {
       return fail(400, "bad_value", `字段 ${key} 必须是记录 ID。`);
     }

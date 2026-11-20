@@ -55,7 +55,6 @@ export const ALLOWED_PATHS = [
   "/rest/log",
 ];
 
-const ALLOWED = new Set(ALLOWED_PATHS);
 const READ_METHODS = new Set(["GET", "HEAD"]);
 
 const MIME = {
@@ -462,7 +461,7 @@ function parseUpstream(headers, body) {
   }
 }
 
-function metaPayload(env, options) {
+function metaPayload(env, options, allowedReads, writeMenus) {
   let host = "http://192.168.2.1";
   let hostError = null;
   try {
@@ -480,8 +479,8 @@ function metaPayload(env, options) {
     tlsInsecure: parseBool(env.ROUTEROS_TLS_INSECURE),
     timeoutMs: timeoutMs(env),
     version: readVersion(),
-    allowedPaths: ALLOWED_PATHS,
-    writeMenus: Object.keys(WRITE_MENUS),
+    allowedPaths: [...allowedReads],
+    writeMenus: Object.keys(writeMenus),
     historyEnabled: !!options.history,
   };
 }
@@ -517,7 +516,8 @@ function sendFile(res, file) {
   res.end(data);
 }
 
-const DEMO_POLICIES = ["read", "write", "reboot", "test", "api", "rest-api", "sensitive", "password"];
+/** Same as RouterOS's built-in `full` group. */
+const DEMO_POLICIES = ["local", "telnet", "ssh", "ftp", "reboot", "read", "write", "policy", "test", "winbox", "password", "web", "sniff", "sensitive", "api", "romon", "rest-api"];
 
 function base64(base64url) {
   return Buffer.from(base64url, "base64url").toString("base64");
@@ -543,8 +543,68 @@ function sessionPayload(session, demo) {
 }
 
 /**
+ * One RouterOS REST call with explicit credentials, for server-side features
+ * (alerts, backups, tools). Returns the parsed JSON (or null for empty bodies);
+ * throws an Error carrying { status, code, detail } on router or network failure.
+ */
+export async function routerCall({ env, request = routerRequest, user, password, method = "GET", path: restPath, body, timeout }) {
+  const origin = normalizeRouterHost(env.ROUTEROS_HOST);
+  const target = new URL(restPath, origin);
+  const payload = body === undefined ? undefined : JSON.stringify(body);
+  let upstream;
+  try {
+    upstream = await request(target, {
+      method,
+      body: payload,
+      timeout: timeout ?? timeoutMs(env),
+      insecure: parseBool(env.ROUTEROS_TLS_INSECURE),
+      signal: null,
+      headers: {
+        Authorization: `Basic ${Buffer.from(`${user}:${password}`, "utf8").toString("base64")}`,
+        Accept: "application/json",
+        ...(payload !== undefined ? { "Content-Type": "application/json", "Content-Length": Buffer.byteLength(payload) } : {}),
+        "Accept-Encoding": "identity",
+        Host: target.host,
+      },
+    });
+  } catch (error) {
+    const failure = classifyNetworkError(error);
+    throw Object.assign(new Error(failure.message), { status: failure.status, code: failure.code });
+  }
+  const parsed = parseUpstream(upstream.headers, upstream.body);
+  if (upstream.status >= 400 || parsed.kind === "html") {
+    const failure = describeRouterFailure(upstream.status, parsed);
+    throw Object.assign(new Error(failure.message), { status: upstream.status >= 400 ? upstream.status : 502, code: failure.code, detail: failure.detail });
+  }
+  return parsed.kind === "json" ? parsed.value : null;
+}
+
+/** The same call against the in-memory demo router. */
+export function demoCall(method, restPath, body) {
+  const pathname = restPath.split("?")[0];
+  if (method === "GET") {
+    const value = demoBody(pathname, Date.now());
+    if (value == null) throw Object.assign(new Error("演示数据里没有这个路径。"), { status: 404, code: "not_found" });
+    return redactSecrets(value);
+  }
+  const result = demoWrite(method, pathname, body ?? {}, Date.now());
+  if (result.status >= 400) {
+    throw Object.assign(new Error(result.body?.message || "演示数据不支持这个操作。"), { status: result.status, code: result.body?.code || "router_error" });
+  }
+  return result.body ?? null;
+}
+
+/**
+ * Feature modules (server/features/*.mjs) extend the proxy with extra read paths,
+ * write menus and /api routes. Route handlers get a context bound to the
+ * logged-in RouterOS account.
+ * @typedef {{ method: string, path: string, policy?: string, handle: (ctx: object) => Promise<void> | void }} FeatureRoute
+ * @typedef {{ reads?: string[], writes?: Record<string, object>, routes?: FeatureRoute[] }} Feature
+ */
+
+/**
  * @param {Record<string, string | undefined>} env
- * @param {{ staticDir?: string | false, request?: typeof routerRequest, history?: { query: (name: string, range: number) => unknown }, sessions?: ReturnType<typeof createSessions>, now?: () => number }} [options]
+ * @param {{ staticDir?: string | false, request?: typeof routerRequest, history?: { query: (name: string, range: number) => unknown }, sessions?: ReturnType<typeof createSessions>, now?: () => number, features?: Feature[], db?: ReturnType<typeof import("./db.mjs").openDb>, guard?: (input: object) => Promise<{ block?: string, confirm?: string } | null> | { block?: string, confirm?: string } | null }} [options]
  */
 export function createHandler(env, options = {}) {
   const demo = parseBool(env.DEMO_MODE);
@@ -552,6 +612,19 @@ export function createHandler(env, options = {}) {
   const request = options.request ?? routerRequest;
   const sessions = options.sessions ?? createSessions({ ttlMs: sessionTtlMs(env), now: options.now });
   const limiter = createLoginLimiter({ now: options.now });
+  const features = options.features ?? [];
+  const writeMenus = Object.assign({}, WRITE_MENUS, ...features.map((feature) => feature.writes ?? {}));
+  const allowedReads = new Set([...ALLOWED_PATHS, ...features.flatMap((feature) => feature.reads ?? [])]);
+  const routes = features.flatMap((feature) => feature.routes ?? []);
+  const clientIp = (req) => String(req.socket?.remoteAddress || "");
+  /** Audit rows never include values, only which fields were sent (passwords stay out). */
+  const audit = (entry) => {
+    try {
+      options.db?.audit(entry);
+    } catch (error) {
+      console.error("[ros] audit write failed", error?.message);
+    }
+  };
 
   const authHeader = (user, password) => `Basic ${Buffer.from(`${user}:${password}`, "utf8").toString("base64")}`;
   const routerGet = (origin, pathWithQuery, user, password) =>
@@ -627,6 +700,7 @@ export function createHandler(env, options = {}) {
       if (upstream.status === 401) {
         limiter.fail(client);
         console.info(`[ros] login failed for ${logUser}`);
+        audit({ user, ip: client, action: "login", status: 401, outcome: "denied" });
         sendJson(res, 401, { code: "bad_login", message: "用户名或密码错误，或该账号的组缺少 api / rest-api 权限。" });
         return;
       }
@@ -641,6 +715,7 @@ export function createHandler(env, options = {}) {
     const id = sessions.create(info);
     res.setHeader("Set-Cookie", sessionCookie(id, sessions.ttlMs / 1000));
     console.info(`[ros] login ${logUser} group=${info.group || "?"}`);
+    audit({ user, ip: client, action: "login", status: 200, outcome: "ok", detail: info.group || "" });
     sendJson(res, 200, sessionPayload(sessions.get(id), demo), { demo });
   }
 
@@ -668,18 +743,32 @@ export function createHandler(env, options = {}) {
           return;
         }
       }
-      write = validateWrite(method, pathname, body);
+      write = validateWrite(method, pathname, body, writeMenus);
       if (!write.ok) {
         sendJson(res, write.status, { code: write.code, message: write.message });
         console.info(`[ros] WRITE ${session.user} ${method} ${pathname} denied ${write.status}`);
+        audit({ user: session.user, ip: clientIp(req), action: method, target: pathname, status: write.status, outcome: "denied", detail: write.message });
         return;
       }
       if (session.policiesKnown && !session.policies.includes(write.policy)) {
         sendJson(res, 403, { code: "forbidden", message: `当前登录的 RouterOS 账号没有 ${write.policy} 权限。` });
         console.info(`[ros] WRITE ${session.user} ${method} ${pathname} denied 403 policy`);
+        audit({ user: session.user, ip: clientIp(req), action: method, target: pathname, status: 403, outcome: "denied", detail: `缺少 ${write.policy} 权限` });
         return;
       }
-    } else if (!ALLOWED.has(pathname)) {
+      if (options.guard) {
+        const verdict = await options.guard({ session, method, pathname, menu: write.menu, op: write.op, fields: write.body ? JSON.parse(write.body) : {} });
+        if (verdict?.block) {
+          sendJson(res, 409, { code: "lockout", message: verdict.block });
+          audit({ user: session.user, ip: clientIp(req), action: method, target: pathname, status: 409, outcome: "blocked", detail: verdict.block });
+          return;
+        }
+        if (verdict?.confirm && req.headers["x-rut-confirm"] !== "1") {
+          sendJson(res, 409, { code: "confirm_required", message: verdict.confirm });
+          return;
+        }
+      }
+    } else if (!allowedReads.has(pathname)) {
       sendJson(res, 403, { code: "forbidden_path", message: "代理不允许读取这个路径。" });
       return;
     }
@@ -693,6 +782,7 @@ export function createHandler(env, options = {}) {
       if (isWrite) {
         const result = demoWrite(method, pathname, write.body ? JSON.parse(write.body) : {}, Date.now());
         console.info(`[ros] WRITE ${session.user} ${method} ${pathname} demo ${result.status}`);
+        audit({ user: session.user, ip: clientIp(req), action: method, target: pathname, status: result.status, outcome: result.status < 400 ? "ok" : "error", detail: Object.keys(write.body ? JSON.parse(write.body) : {}).join(",") });
         sendJson(res, result.status, redactSecrets(result.body ?? {}), { demo: true });
         return;
       }
@@ -746,6 +836,15 @@ export function createHandler(env, options = {}) {
       }
       if (isWrite) {
         console.info(`[ros] WRITE ${session.user} ${method} ${pathname} ${upstream.status} ${Date.now() - started}ms`);
+        audit({
+          user: session.user,
+          ip: clientIp(req),
+          action: method,
+          target: pathname,
+          status: upstream.status,
+          outcome: upstream.status < 400 ? "ok" : "error",
+          detail: upstream.status < 400 ? Object.keys(write.body ? JSON.parse(write.body) : {}).join(",") : describeRouterFailure(upstream.status, parsed).message,
+        });
         if (upstream.status >= 400) {
           const failure = describeRouterFailure(upstream.status, parsed);
           sendJson(res, upstream.status, failure.code === "not_found" ? { ...failure, message: "路由器上找不到这条记录，可能已被删除。" } : failure);
@@ -767,7 +866,10 @@ export function createHandler(env, options = {}) {
       if (error?.code === "ABORT") return;
       const failure = classifyNetworkError(error);
       if (!res.writableEnded) sendJson(res, failure.status, failure);
-      if (isWrite) console.info(`[ros] WRITE ${session.user} ${method} ${pathname} ${failure.code}`);
+      if (isWrite) {
+        console.info(`[ros] WRITE ${session.user} ${method} ${pathname} ${failure.code}`);
+        audit({ user: session.user, ip: clientIp(req), action: method, target: pathname, status: failure.status, outcome: "error", detail: failure.message });
+      }
     } finally {
       res.off?.("close", onClose);
     }
@@ -828,7 +930,7 @@ export function createHandler(env, options = {}) {
     }
 
     if (pathname === "/api/meta") {
-      if (onlyMethod(["GET", "HEAD"])) sendJson(res, 200, metaPayload(env, options), { demo });
+      if (onlyMethod(["GET", "HEAD"])) sendJson(res, 200, metaPayload(env, options, allowedReads, writeMenus), { demo });
       return true;
     }
     if (pathname === "/api/login") {
@@ -873,6 +975,48 @@ export function createHandler(env, options = {}) {
       }
       const rawRange = url.searchParams.get("range");
       sendJson(res, 200, options.history.query(rawName, rawRange != null ? Number(rawRange) : 300), { demo });
+      return true;
+    }
+    const samePath = routes.filter((item) => item.path === pathname);
+    const route = samePath.find((item) => item.method === method || (method === "HEAD" && item.method === "GET")) ?? samePath[0];
+    if (route) {
+      if (!onlyMethod(samePath.map((item) => item.method))) return true;
+      if (route.policy && session.policiesKnown && !session.policies.includes(route.policy)) {
+        sendJson(res, 403, { code: "forbidden", message: `当前登录的 RouterOS 账号没有 ${route.policy} 权限。` });
+        return true;
+      }
+      let body = {};
+      if (method !== "GET" && method !== "HEAD") {
+        try {
+          body = await readJsonBody(req);
+        } catch (error) {
+          sendJson(res, error.status || 400, { code: error.code || "bad_body", message: error.message });
+          return true;
+        }
+      }
+      const ctx = {
+        req,
+        res,
+        url,
+        body,
+        session,
+        demo,
+        env,
+        db: options.db,
+        ip: clientIp(req),
+        send: (status, payload) => sendJson(res, status, payload, { demo }),
+        audit: (entry) => audit({ user: session.user, ip: clientIp(req), ...entry }),
+        /** RouterOS call as the logged-in account (demo: the in-memory router). */
+        router: (routerMethod, restPath, routerBody, timeout) =>
+          demo
+            ? demoCall(routerMethod, restPath, routerBody)
+            : routerCall({ env, request, user: session.user, password: session.password, method: routerMethod, path: restPath, body: routerBody, timeout }),
+      };
+      try {
+        await route.handle(ctx);
+      } catch (error) {
+        if (!res.writableEnded) sendJson(res, error.status && error.status >= 400 ? error.status : 500, { code: error.code || "feature_error", message: error.message || "处理失败" });
+      }
       return true;
     }
     if (pathname.startsWith("/rest")) {

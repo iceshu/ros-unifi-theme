@@ -6,3 +6,4 @@ dist
 *.log
 server/*.test.mjs
 shared/*.test.mjs
+data

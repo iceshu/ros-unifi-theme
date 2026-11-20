@@ -1,4 +1,5 @@
 import { Copy, Download } from "@lucide/solid";
+import { renderSVG } from "uqr";
 import { createMemo, createSignal, Show } from "solid-js";
 import { ros, wireguardKeypair, type RosFields } from "../lib/api";
 import { addressesOn, shortKey, type RosRecord } from "../lib/model";
@@ -131,7 +132,14 @@ export function WireGuardPeerForm(props: { peer?: RosRecord; interfaceName?: str
         fallback={
           <div class="flex flex-col gap-3">
             <p class="rounded-lg bg-[var(--good-soft)] px-3 py-2 text-[13px] text-[var(--pill-good)]">对端已添加。把下面的配置导入手机或电脑上的 WireGuard 客户端。</p>
-            <pre class="overflow-x-auto rounded-lg border border-line bg-panel-2 p-3 font-mono text-[12px] leading-relaxed select-all">{config()}</pre>
+            <div class="flex flex-wrap items-start gap-4">
+              <pre class="min-w-0 flex-1 overflow-x-auto rounded-lg border border-line bg-panel-2 p-3 font-mono text-[12px] leading-relaxed select-all">{config()}</pre>
+              <div
+                class="h-40 w-40 shrink-0 overflow-hidden rounded-lg border border-line bg-white p-1"
+                title="扫描二维码导入 WireGuard 配置"
+                innerHTML={renderSVG(config() ?? "")}
+              />
+            </div>
             <div class="flex gap-2">
               <button type="button" class="btn" onClick={() => void copyText(config() ?? "")}>
                 <Copy class="h-3.5 w-3.5" aria-hidden="true" />

@@ -1,14 +1,24 @@
-import { toApiError } from "./api";
+import { toApiError, withConfirmed } from "./api";
+import { askConfirm } from "./confirm";
 import type { DashboardApi } from "./store";
 import { showToast } from "./toast";
 
 /**
  * Run one RouterOS change: toast the outcome, then re-read everything so the
  * page shows the router's real state. Returns false on failure so forms stay open.
+ * When the server's lockout guard asks for confirmation (409 confirm_required),
+ * the user is asked and the same change is re-sent as confirmed.
  */
 export async function runWrite(dash: Pick<DashboardApi, "refresh">, success: string, op: () => Promise<unknown>): Promise<boolean> {
   try {
-    await op();
+    try {
+      await op();
+    } catch (error) {
+      const api = toApiError(error);
+      if (api.code !== "confirm_required") throw error;
+      if (!(await askConfirm("可能失去对路由器的访问", api.message))) return false;
+      await withConfirmed(op);
+    }
     showToast(success, "ok");
     dash.refresh();
     return true;

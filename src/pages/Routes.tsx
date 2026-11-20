@@ -1,11 +1,24 @@
-import { createMemo, createSignal, For } from "solid-js";
+import { Pencil, Trash2 } from "@lucide/solid";
+import { createMemo, createSignal, For, Show } from "solid-js";
+import { RouteForm } from "../components/NetconfRouteForm";
+import { AddButton, ConfirmDialog, RowMenu } from "../components/form";
 import { EmptyState, PageHeader, Pill } from "../components/ui";
-import { flag } from "../lib/model";
+import { ros } from "../lib/api";
+import { flag, type RosRecord } from "../lib/model";
+import { runWrite } from "../lib/mutate";
+import { can } from "../lib/session";
 import { useDashboard } from "../lib/store";
+
+const MENU = "/rest/ip/route";
 
 export function RoutesPage() {
   const dash = useDashboard();
   const [activeOnly, setActiveOnly] = createSignal(false);
+  const [editing, setEditing] = createSignal<RosRecord | "new" | null>(null);
+  const [deleting, setDeleting] = createSignal<RosRecord | null>(null);
+
+  const isStatic = (route: RosRecord) => flag(route.static) && !flag(route.dynamic) && !flag(route.connect);
+
   const rows = createMemo(() =>
     dash
       .routes()
@@ -21,9 +34,15 @@ export function RoutesPage() {
       }),
   );
 
+  const interfaces = createMemo(() => [
+    ...new Set(dash.interfaces().map((r) => r.name).filter(Boolean)),
+  ]);
+
   return (
     <div>
-      <PageHeader title="路由" />
+      <PageHeader title="路由" subtitle="静态路由可编辑；动态路由（直连、PPPoE 等）只读">
+        <AddButton label="添加静态路由" onClick={() => setEditing("new")} />
+      </PageHeader>
       <div class="mb-4">
         <button
           type="button"
@@ -48,13 +67,15 @@ export function RoutesPage() {
                 <th>距离</th>
                 <th>表</th>
                 <th>标记</th>
-                <th>注释</th>
+                <th>备注</th>
+                <th class="w-10" />
               </tr>
             </thead>
             <tbody>
               <For each={rows()} keyed={(item) => item.route[".id"] || String(item.index)}>
                 {(item) => {
                   const route = () => item().route;
+                  const editable = () => isStatic(route());
                   return (
                     <tr class={flag(route().disabled) ? "opacity-50" : ""}>
                       <td class="font-mono">{route()["dst-address"] || "—"}</td>
@@ -71,6 +92,21 @@ export function RoutesPage() {
                         </div>
                       </td>
                       <td class="text-sm text-muted">{route().comment || ""}</td>
+                      <td>
+                        <Show when={can("write") && editable()}>
+                          <RowMenu
+                            items={[
+                              { label: "编辑", icon: <Pencil aria-hidden="true" />, onSelect: () => setEditing(route()) },
+                              {
+                                label: "删除",
+                                icon: <Trash2 aria-hidden="true" />,
+                                danger: true,
+                                onSelect: () => setDeleting(route()),
+                              },
+                            ]}
+                          />
+                        </Show>
+                      </td>
                     </tr>
                   );
                 }}
@@ -79,6 +115,28 @@ export function RoutesPage() {
           </table>
         </div>
       )}
+
+      <Show when={editing()} keyed>
+        {(current) => (
+          <RouteForm
+            entry={current === "new" ? undefined : current}
+            interfaces={interfaces()}
+            onClose={() => setEditing(null)}
+          />
+        )}
+      </Show>
+      <Show when={deleting()} keyed>
+        {(route) => (
+          <ConfirmDialog
+            title="删除静态路由？"
+            message={`将删除到 ${route["dst-address"]} 经 ${route.gateway || "—"} 的路由。`}
+            confirmLabel="删除"
+            danger
+            onClose={() => setDeleting(null)}
+            onConfirm={() => runWrite(dash, "已删除路由", () => ros.remove(MENU, route[".id"]))}
+          />
+        )}
+      </Show>
     </div>
   );
 }

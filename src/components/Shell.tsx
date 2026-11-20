@@ -7,6 +7,7 @@ import { can, session, setSession } from "../lib/session";
 import { useDashboard } from "../lib/store";
 import { theme, toggleTheme } from "../lib/theme";
 import { CommandPalette } from "./CommandPalette";
+import { EventsBell } from "./EventsBell";
 import { DetailDrawer } from "./DetailDrawer";
 import { NAV, IconMark, type NavItem } from "./icons";
 import { RateText } from "./ui";
@@ -157,6 +158,7 @@ export function Shell(props: ParentProps) {
             <RateText bps={wanRate()?.txBps} dir="up" />
           </button>
           <span class="hidden text-[12px] text-faint xl:inline">{formatAgo(dash.updatedAt(), dash.now())}</span>
+          <EventsBell />
           <button type="button" class="icon-btn" aria-label={theme() === "dark" ? "切换到浅色" : "切换到深色"} onClick={toggleTheme}>
             {theme() === "dark" ? <Sun aria-hidden="true" /> : <Moon aria-hidden="true" />}
           </button>
