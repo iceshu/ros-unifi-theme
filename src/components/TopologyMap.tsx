@@ -1,14 +1,11 @@
 import { createMemo, createSignal, For, Show } from "solid-js";
-import { formatBps } from "../lib/format";
+import { FlowLink, rateText } from "./TopologyFlow";
+import { TopologyNodePanel, type TopologySelection } from "./TopologyNodePanel";
+import "./topology-flow.css";
 import { compareName, flag, linkState } from "../lib/model";
 import { useDashboard } from "../lib/store";
 import { collectClients, type TopoClient } from "../lib/topology";
 import { DeviceIcon } from "./DeviceIcon";
-
-function rateText(bps: number | null | undefined): string {
-  const formatted = formatBps(bps ?? null);
-  return formatted ? `${formatted.value} ${formatted.unit}` : "—";
-}
 
 function matches(client: TopoClient, query: string): boolean {
   const raw = query.trim().toLowerCase();
@@ -20,6 +17,7 @@ function matches(client: TopoClient, query: string): boolean {
 export function TopologyMap() {
   const dash = useDashboard();
   const [query, setQuery] = createSignal("");
+  const [selection, setSelection] = createSignal<TopologySelection | null>(null);
   const wanName = () => dash.primaryWan();
   const wan = createMemo(() => dash.interfaces().find((row) => row.name === wanName()));
   const wanUp = createMemo(() => !!wan() && flag(wan()?.running) && !flag(wan()?.disabled));
@@ -59,6 +57,12 @@ export function TopologyMap() {
         .sort((a, b) => Number(b.online) - Number(a.online)),
     }));
   });
+  // LAN RX is upload from clients; TX is download to clients.
+  const lanRate = createMemo(() => lanPorts().reduce((sum, port) => {
+    if (!flag(port.running) || flag(port.disabled)) return sum;
+    const rate = dash.rates()[port.name];
+    return { rxBps: sum.rxBps + (rate?.rxBps || 0), txBps: sum.txBps + (rate?.txBps || 0) };
+  }, { rxBps: 0, txBps: 0 }));
   const unplaced = createMemo(() => clients().filter((client) => !client.port));
   const peers = createMemo(() => dash.wireguardPeers() ?? []);
 
@@ -75,15 +79,15 @@ export function TopologyMap() {
         />
       </div>
       <div class="topo-spine">
-        <div class="topo-chip">
+        <button type="button" class="topo-chip" onClick={() => setSelection({ type: "internet" })}>
           <i class={`led ${wanUp() ? "led-good" : dash.ready() ? "led-bad" : "led-muted"}`} />
           <div>
             <div class="kicker">互联网</div>
             <div class="text-sm">{!dash.ready() ? "—" : wanUp() ? "已连接" : "未连接"}</div>
           </div>
-        </div>
-        <div class="topo-line" />
-        <button type="button" class="topo-chip" onClick={() => wanName() && dash.setSelection({ type: "iface", name: wanName()! })}>
+        </button>
+        <FlowLink rx={wanRate()?.rxBps} tx={wanRate()?.txBps} up={wanUp()} />
+        <button type="button" class="topo-chip" onClick={() => setSelection(wanName() ? { type: "iface", name: wanName()! } : { type: "unknown", label: "广域网" })}>
           <i class={`led ${wanUp() ? "led-good" : "led-bad"}`} />
           <div>
             <div class="kicker">广域网</div>
@@ -94,11 +98,11 @@ export function TopologyMap() {
           </div>
         </button>
         <Show when={carrier()}>
-          <div class="topo-line" />
+          <FlowLink rx={wanRate()?.rxBps} tx={wanRate()?.txBps} up={wanUp() && flag(carrier()?.running) && !flag(carrier()?.disabled)} />
           <button
             type="button"
             class="topo-chip"
-            onClick={() => carrierName() && dash.setSelection({ type: "iface", name: carrierName() })}
+            onClick={() => setSelection({ type: "iface", name: carrierName() })}
           >
             <i class={`led ${flag(carrier()?.running) && !flag(carrier()?.disabled) ? "led-good" : "led-bad"}`} />
             <div>
@@ -108,8 +112,8 @@ export function TopologyMap() {
             </div>
           </button>
         </Show>
-        <div class="topo-line" />
-        <button type="button" class="topo-chip" onClick={() => dash.setSelection({ type: "gateway" })}>
+        <FlowLink rx={wanRate()?.rxBps} tx={wanRate()?.txBps} up={wanUp()} />
+        <button type="button" class="topo-chip" onClick={() => setSelection({ type: "gateway" })}>
           <i class={`led ${dash.resource() ? "led-good" : "led-muted"}`} />
           <div>
             <div class="kicker">网关</div>
@@ -118,14 +122,18 @@ export function TopologyMap() {
         </button>
       </div>
 
+      <div class="topology-backbone">
+        <p>局域网骨干 · ↓ {rateText(lanRate().txBps)} / ↑ {rateText(lanRate().rxBps)}</p>
+        <FlowLink wide rx={lanRate().txBps} tx={lanRate().rxBps} up={lanPorts().some((port) => flag(port.running) && !flag(port.disabled))} />
+      </div>
       <div class="topo-ports">
         <For each={columns()}>
           {(column) => (
             <div class="topo-col">
-              <button type="button" class="topo-chip" onClick={() => dash.setSelection({ type: "iface", name: column.name })}>
+              <button type="button" class="topo-chip" onClick={() => setSelection({ type: "iface", name: column.name })}>
                 <i
                   class={`led ${
-                    column.iface && flag(column.iface.running) && !flag(column.iface.disabled) ? "led-good" : "led-bad"
+                    !column.iface ? "led-muted" : flag(column.iface.disabled) ? "led-muted" : flag(column.iface.running) ? "led-good" : "led-bad"
                   }`}
                 />
                 <div>
@@ -133,8 +141,9 @@ export function TopologyMap() {
                   <div class="text-[11px] text-faint">{column.iface ? linkState(column.iface).label : "端口"}</div>
                 </div>
               </button>
+              <FlowLink wide rx={dash.rates()[column.name]?.txBps} tx={dash.rates()[column.name]?.rxBps} up={flag(column.iface?.running) && !flag(column.iface?.disabled)} />
               <For each={column.clients.slice(0, 8)}>
-                {(client) => <ClientChip client={client} />}
+                {(client) => <ClientChip client={client} onSelect={setSelection} />}
               </For>
               {column.clients.length > 8 ? <div class="px-1 text-[11px] text-faint">还有 {column.clients.length - 8}</div> : null}
             </div>
@@ -150,7 +159,7 @@ export function TopologyMap() {
               </div>
             </div>
             <For each={unplaced().slice(0, 8)}>
-              {(client) => <ClientChip client={client} />}
+              {(client) => <ClientChip client={client} onSelect={setSelection} />}
             </For>
           </div>
         </Show>
@@ -161,7 +170,7 @@ export function TopologyMap() {
               class="topo-chip"
               onClick={() => {
                 const name = dash.wireguard()?.[0]?.name;
-                if (name) dash.setSelection({ type: "iface", name });
+                setSelection(name ? { type: "iface", name } : { type: "unknown", label: "WireGuard 隧道" });
               }}
             >
               <i class={`led ${dash.wireguard()?.some((row) => flag(row.running)) ? "led-good" : "led-muted"}`} />
@@ -175,7 +184,7 @@ export function TopologyMap() {
                 <button
                   type="button"
                   class="topo-client"
-                  onClick={() => peer[".id"] && dash.setSelection({ type: "peer", id: peer[".id"] })}
+                  onClick={() => setSelection({ type: "peer", id: peer[".id"] || "" })}
                 >
                   <i class={`led ${peer["last-handshake"] && peer["last-handshake"] !== "never" ? "led-good" : "led-muted"}`} />
                   <span class="truncate">{peer.comment || "对端"}</span>
@@ -185,17 +194,19 @@ export function TopologyMap() {
           </div>
         </Show>
       </div>
+      <Show when={selection()} keyed>
+        {(node) => <TopologyNodePanel selection={node} onSelect={setSelection} onClose={() => setSelection(null)} />}
+      </Show>
     </section>
   );
 }
 
-function ClientChip(props: { client: TopoClient }) {
-  const dash = useDashboard();
+function ClientChip(props: { client: TopoClient; onSelect: (value: TopologySelection) => void }) {
   return (
     <button
       type="button"
       class={props.client.online ? "topo-client" : "topo-client is-off"}
-      onClick={() => dash.setSelection({ type: "client", ip: props.client.ip, mac: props.client.mac })}
+      onClick={() => props.onSelect({ type: "client", ip: props.client.ip, mac: props.client.mac })}
     >
       <DeviceIcon kind={props.client.kind} />
       <span class="min-w-0">

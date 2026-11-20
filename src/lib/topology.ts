@@ -11,6 +11,20 @@ export interface TopoClient {
   kind: DeviceKind;
 }
 
+/** Two seconds at 1 Mbps, 0.4 seconds at 100 Mbps; bounded for tiny/burst rates. */
+export function flowDuration(bps: number | undefined): number {
+  if (!bps || !Number.isFinite(bps) || bps <= 0) return 2;
+  return Math.max(0.25, Math.min(3, 2 * Math.pow(bps / 1_000_000, -Math.log10(5) / 2)));
+}
+
+/** Match RouterOS route interface tokens, not substrings (ether1 must not match ether10). */
+export function routeUsesInterface(route: RosRecord, name: string): boolean {
+  if (!name) return false;
+  return [route.interface, route.gateway, route["immediate-gw"]].some((value) =>
+    (value || "").split(/[,%\s]+/).includes(name),
+  );
+}
+
 const ONLINE_ARP = new Set(["reachable", "stale", "delay", "permanent", "probe"]);
 
 export function sameMac(left: string | undefined, right: string | undefined): boolean {
