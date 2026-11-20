@@ -1,5 +1,6 @@
+import { createTableSort, SortHeader, useTableKeyboard } from "../components/TableSort";
 import { WriteToggle } from "../components/WriteToggle";
-import { createMemo, createSignal, For } from "solid-js";
+import { createEffect, createMemo, createSignal, For, type Accessor } from "solid-js";
 import { EmptyState, PageHeader, Pill, RateText } from "../components/ui";
 import { formatBytes } from "../lib/format";
 import {
@@ -18,6 +19,9 @@ import { useDashboard } from "../lib/store";
 
 export function InterfacesPage() {
   const dash = useDashboard();
+  const escape = useTableKeyboard();
+  const sorting = createTableSort<RosRecord>();
+  const sorted = () => sorting.rows(ordered(), (row, key) => key === "role" ? roleLabel(roleOf(row)) : key === "rx" ? dash.rates()[row.name]?.rxBps : key === "tx" ? dash.rates()[row.name]?.txBps : row.name);
   const roleOf = (row: RosRecord): Role =>
     ifaceRole(row, dash.wanNames(), dash.lanNames(), dash.listMembers(), dash.bridgePorts());
   const ordered = createMemo(() =>
@@ -77,18 +81,18 @@ export function InterfacesPage() {
           <table class="data-table">
             <thead>
               <tr>
-                <th>接口</th>
-                <th>角色</th>
+                <SortHeader column="name" state={sorting.sort()} toggle={sorting.toggle}>接口</SortHeader>
+                <SortHeader column="role" state={sorting.sort()} toggle={sorting.toggle}>角色</SortHeader>
                 <th>状态</th>
-                <th>接收</th>
-                <th>发送</th>
+                <SortHeader column="rx" state={sorting.sort()} toggle={sorting.toggle}>接收</SortHeader>
+                <SortHeader column="tx" state={sorting.sort()} toggle={sorting.toggle}>发送</SortHeader>
                 <th>累计</th>
                 <th>错误</th>
               </tr>
             </thead>
             <tbody>
-              <For each={ordered()} keyed={(row) => row[".id"] || row.name}>
-                {(row) => <IfaceRow name={row().name} role={roleOf(row())} />}
+              <For each={sorted()} keyed={(row) => row[".id"] || row.name}>
+                {(row) => <IfaceRow name={row().name} role={roleOf(row())} escape={escape} />}
               </For>
             </tbody>
           </table>
@@ -112,8 +116,9 @@ function PortTile(props: { row: RosRecord; role: Role; speed?: string; bridge?: 
   );
 }
 
-function IfaceRow(props: { name: string; role: Role }) {
+function IfaceRow(props: { name: string; role: Role; escape: Accessor<number> }) {
   const [expanded, setExpanded] = createSignal(false);
+  createEffect(() => props.escape(), () => { setExpanded(false); });
   const dash = useDashboard();
   const row = createMemo(() => dash.interfaces().find((item) => item.name === props.name));
   const rate = createMemo(() => dash.rates()[props.name]);
@@ -157,8 +162,8 @@ function IfaceRow(props: { name: string; role: Role }) {
       <td class={errors() > 0 ? "text-warn" : "text-muted"}>{errors()}</td>
     </tr>
     {expanded() ? <tr><td colspan={7}>
-      <h3 class="text-xs text-faint">全部字段 · interface</h3><AllFields row={row() ?? {}} />
-      {dash.ethernet().find((item) => item.name === props.name) ? <><h3 class="text-xs text-faint">全部字段 · ethernet</h3><AllFields row={dash.ethernet().find((item) => item.name === props.name)!} /></> : null}
+      <h3 class="text-xs text-faint">全部字段 · interface</h3><AllFields row={row() ?? {}} copy />
+      {dash.ethernet().find((item) => item.name === props.name) ? <><h3 class="text-xs text-faint">全部字段 · ethernet</h3><AllFields row={dash.ethernet().find((item) => item.name === props.name)!} copy /></> : null}
     </td></tr> : null}
     </>
   );

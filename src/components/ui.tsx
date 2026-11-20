@@ -70,7 +70,7 @@ export function EmptyState(props: { title: string; detail?: string }) {
 }
 
 export function Skeleton(props: { class?: string }) {
-  return <div class={`animate-pulse rounded-xl bg-line ${props.class ?? "h-8 w-32"}`} />;
+  return <div aria-hidden="true" class={`skeleton rounded-xl bg-line ${props.class ?? "h-8 w-32"}`} />;
 }
 
 export function toneClass(tone: Tone): string {

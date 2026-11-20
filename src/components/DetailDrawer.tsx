@@ -1,4 +1,5 @@
-import { createMemo, Show } from "solid-js";
+import { CopyText } from "./CopyText";
+import { createEffect, createMemo, createSignal, onCleanup, Show } from "solid-js";
 import { formatBps, formatBytes, formatLastSeen, formatUptime } from "../lib/format";
 import { arpStatusLabel, dhcpStatusLabel, hardwareLabel, leaseIdentity, linkState, type RosRecord } from "../lib/model";
 import { useDashboard, type HistoryPoint } from "../lib/store";
@@ -13,13 +14,42 @@ function rateText(bps: number | null | undefined): string {
 
 export function DetailDrawer() {
   const dash = useDashboard();
-  const selection = () => dash.selection();
+  const [selection, setSelection] = createSignal(dash.selection());
+  const [open, setOpen] = createSignal(false);
+  let drawer: HTMLElement | undefined;
+  let opener: HTMLElement | null = null;
+  createEffect(() => dash.selection(), (selected) => {
+    if (selected) {
+      if (!selection()) opener = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+      setSelection(selected);
+      const frame = requestAnimationFrame(() => { drawer?.getBoundingClientRect(); setOpen(true); drawer?.focus(); });
+      onCleanup(() => cancelAnimationFrame(frame));
+    } else {
+      setOpen(false);
+      if (opener?.isConnected) opener.focus({ preventScroll: true });
+      const timer = setTimeout(() => setSelection(null), 200);
+      onCleanup(() => clearTimeout(timer));
+    }
+  });
+  createEffect(() => true, () => {
+    const keydown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") dash.setSelection(null);
+      if (event.key === "Tab" && dash.selection() && drawer) {
+        const items = Array.from(drawer.querySelectorAll<HTMLElement>("button, a[href], input, [tabindex='0']"));
+        const first = items[0], last = items[items.length - 1];
+        if (event.shiftKey && (document.activeElement === first || document.activeElement === drawer)) { event.preventDefault(); last?.focus(); }
+        else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first?.focus(); }
+      }
+    };
+    document.addEventListener("keydown", keydown);
+    onCleanup(() => document.removeEventListener("keydown", keydown));
+  });
   return (
     <Show when={selection()} keyed>
       {(sel) => (
         <>
-          <div class="drawer-backdrop" onClick={() => dash.setSelection(null)} />
-          <aside class="drawer" role="dialog" aria-label="详情">
+          <div class={`drawer-backdrop ${open() ? "is-open" : ""}`} onClick={() => dash.setSelection(null)} />
+          <aside ref={drawer} class={`drawer ${open() ? "is-open" : ""}`} role="dialog" aria-modal="true" aria-label="详情" tabindex={-1}>
             <div class="mb-4 flex items-start justify-between gap-3">
               <div class="text-sm text-faint">
                 {sel.type === "client" ? "设备" : sel.type === "peer" ? "WireGuard" : sel.type === "gateway" ? "网关" : "接口"}
@@ -66,8 +96,8 @@ function ClientBody(props: { ip: string; mac: string }) {
       <div class="flex items-center gap-3">
         <DeviceIcon kind={identity()?.kind ?? "generic"} />
         <div class="min-w-0">
-          <h2 class="truncate text-lg font-medium">{identity()?.title || props.ip || "设备"}</h2>
-          {identity()?.subtitle ? <p class="truncate text-sm text-faint">{identity()?.subtitle}</p> : null}
+          <h2 class="truncate text-lg font-medium"><CopyText value={identity()?.title || props.ip || "设备"}>{identity()?.title || props.ip || "设备"}</CopyText></h2>
+          {identity()?.subtitle ? <p class="truncate text-sm text-faint"><CopyText value={identity()?.subtitle || ""}>{identity()?.subtitle}</CopyText></p> : null}
         </div>
       </div>
       <dl class="grid grid-cols-2 gap-3 text-sm">
@@ -112,7 +142,7 @@ function ClientBody(props: { ip: string; mac: string }) {
           <ul class="mt-2 space-y-1">
             {(traffic()?.peers ?? []).map((peer) => (
               <li class="flex items-center justify-between gap-3 text-sm">
-                <span class="font-mono">{peer.ip}</span>
+                <CopyText class="font-mono" value={peer.ip} />
                 <span class="text-faint">
                   {peer.count} · {formatBytes(peer.bytes)}
                 </span>
@@ -217,7 +247,7 @@ function Field(props: { label: string; value: string }) {
   return (
     <div class="min-w-0">
       <dt class="kicker">{props.label}</dt>
-      <dd class="mt-1 truncate font-mono text-xs">{props.value}</dd>
+      <dd class="mt-1 truncate font-mono text-xs">{["IP", "MAC", "允许地址", "端点"].includes(props.label) && props.value !== "—" ? <CopyText value={props.value} /> : props.value}</dd>
     </div>
   );
 }
