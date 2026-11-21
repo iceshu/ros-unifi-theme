@@ -1,6 +1,13 @@
-# 网关
+# ros-unifi-theme · 网关
 
-放在局域网里的只读网络仪表。浅色界面，打开就能看到路由器是否在线、互联网通不通、谁在用网。数据来自 MikroTik RouterOS 7 的 REST API。仪表跑在你自己的 N100 上，默认不创建、不修改、不删除路由器上的任何东西；可选写操作见下文。
+[![GitHub stars](https://img.shields.io/github/stars/iceshu/ros-unifi-theme?style=flat-square)](https://github.com/iceshu/ros-unifi-theme/stargazers)
+[![GitHub forks](https://img.shields.io/github/forks/iceshu/ros-unifi-theme?style=flat-square)](https://github.com/iceshu/ros-unifi-theme/network/members)
+[![GitHub issues](https://img.shields.io/github/issues/iceshu/ros-unifi-theme?style=flat-square)](https://github.com/iceshu/ros-unifi-theme/issues)
+[![Last commit](https://img.shields.io/github/last-commit/iceshu/ros-unifi-theme?style=flat-square)](https://github.com/iceshu/ros-unifi-theme/commits/main)
+
+放在局域网里的 MikroTik RouterOS 7 仪表，照着 UniFi 管理后台的风格做的：浅色界面、左侧深色导航、卡片式数据、拓扑图一眼能看到谁在用网。数据来自 RouterOS 7 的 REST API，跑在你自己的 N100 上。
+
+默认**只读**：不创建、不修改、不删除路由器上的任何东西。想开关接口、防火墙规则、WireGuard peer 的话，有一组默认关闭的写操作（见下文）。
 
 默认按这台家里的路由器来写示例，地址都可以改：
 
@@ -15,6 +22,55 @@
 ```text
 浏览器  --只发 GET-->  N100:8080  --GET + Basic-->  192.168.2.1/rest
 ```
+
+## 功能
+
+### 概览
+
+- 名称、RouterOS 版本、运行时间、CPU、内存、温度（有就显示，没有就写未报告）
+- PPPoE / 广域网状态、当前下载和上传
+- ECharts 吞吐曲线：渐变面积图、悬浮提示、十字准星、可点图例，5 分钟窗口
+- CPU、内存仪表盘；有 PPP 会话时显示会话卡片
+
+### 拓扑图（会动的）
+
+- 互联网 → 广域网 → 物理口 → 网关 → 各端口的链路图
+- 连线有**流动画**：下载蓝色往下流，上传绿色往上流，流速跟实时速率挂钩，流量大流得快，断了就静止变灰；骨干还有一条汇总的 LAN 流量带
+- **点任意节点看连接路径**：点一台电脑，下面展开 `电脑 → 接入端口 → 桥 → 网关 → 广域网 → 互联网`，每一跳的状态、速率都能点开接着看；端口、网关、WAN、WireGuard peer 各有自己的详情（链路状态、错误计数、VLAN、邻居、地址、路由、握手状态……），缺数据就写「未知/未定位」，不报错
+- 尊重系统的「减少动态效果」设置
+
+### 设备
+
+- DHCP 租约（主机名、IP、MAC、状态、最近出现），能对上的 ARP 会标在旁边
+- 设备种类环形图（手机、笔记本、服务器、摄像头……），点扇区就能筛表格
+- 可搜索；接口与租约行可展开查看除 `.id` 外的全部返回字段
+
+### 接口
+
+- 运行或禁用、类型、收发速率和字节、错误；广域网和局域网分开标
+- 附带 ethernet 字段和 VLAN 表；表格点列头排序
+
+### WiFi、防火墙、NAT
+
+- WiFi：接口、配置、注册客户端；没装 WiFi 菜单时显示空状态
+- 防火墙：filter / mangle 标签页；写操作启用后可切换 filter 规则启用/禁用
+- NAT、地址列表：规则、地址、禁用状态及计数器
+
+### 路由、DHCP、DNS、邻居、队列、日志、WireGuard、连接
+
+- 路由表、DHCP 服务器/网络/地址池、DNS 配置与静态记录、发现邻居、简单队列、最近 200 条日志（文本搜索，只取 time、topics、message）
+- WireGuard：状态与 peer，私钥不会出现在页面上；启用写操作后可切换 peer 启用/禁用
+- 连接页：已安装包、服务端配置了哪台路由器、账号有没有配（不显示密码），以及 www 未开、认证失败、主机不可达这几类错误
+
+### 交互
+
+- 表格排序、抽屉滑入动画（Esc 关闭、焦点回到原处）、操作成功/失败弹 Toast
+- IP、MAC、主机名点一下就复制；`/` 聚焦搜索；加载时骨架屏
+- 全站 Lucide 图标，每页一个专属图标
+
+### 演示模式
+
+没有路由器、只想看界面时设 `DEMO_MODE=true`，37 条 REST 路径都有样例数据，页面顶部一直标着「演示模式」。数字会随时间变化，好让速率曲线有东西可画。
 
 ## 先看安全
 
@@ -108,21 +164,11 @@ npm start
 
 默认监听 `8080`。`npm start` 会读取当前目录的 `.env`。
 
-## 页面
+测试：
 
-- **概览**：名称、RouterOS 版本、运行时间、CPU、内存、温度（有就显示，没有就写未报告）、PPPoE / 广域网状态、当前下载和上传，以及轮询得到的曲线。
-- **设备**：DHCP 租约（主机名、IP、MAC、状态、最近出现），能对上的 ARP 会标在旁边。可搜索。
-- **接口**：运行或禁用、类型、收发速率和字节、错误。广域网和局域网会分开标。
-- **防火墙**：filter / mangle 标签页及 NAT 链接。写操作启用后可切换 filter 规则启用/禁用。
-- **NAT**、**地址列表**：规则、地址、禁用状态及计数器。
-- **DHCP**、**DNS**：服务器、网络、地址池、DNS 配置与静态记录。
-- **邻居**、**队列**、**WiFi**：发现邻居、简单队列、WiFi 接口/配置/注册客户端；未安装 WiFi 菜单时显示空状态。
-- **日志**：最近 200 条，支持文本搜索；请求仅取 time、topics、message。
-- 接口与 DHCP 租约行可展开查看除 `.id` 外的全部返回字段；接口附带 ethernet 字段和 VLAN 表。概览在有会话时显示 PPP 会话。
-- **路由** 和 **WireGuard**：接口能干净返回时就显示。WireGuard 默认只看状态，启用写操作后可切换 peer 启用/禁用；私钥不会出现在页面上。
-- **连接**：已安装包、服务端配置了哪台路由器、账号有没有配（不显示密码），以及 www 未开、认证失败、主机不可达这几类错误。
-
-互联网吞吐取 `WAN_INTERFACES` 里的 PPPoE 接口（默认 `liantong`）。`ether0` 是拨号的物理口，速率不再加一次，否则同一份流量会算两遍。
+```bash
+npm test
+```
 
 ## 代理行为
 
@@ -133,6 +179,8 @@ npm start
 - 认证失败后会暂停大约 30 秒再试，避免触发路由器的登录限制。
 
 RouterOS 的 REST 从 7.1beta4 开始提供，返回的 JSON 里数字和布尔也都是字符串。单条菜单（例如 `/system/resource`）通常是只含一个对象的数组。
+
+互联网吞吐取 `WAN_INTERFACES` 里的 PPPoE 接口（默认 `liantong`）。`ether0` 是拨号的物理口，速率不再加一次，否则同一份流量会算两遍。
 
 ## 写操作（默认关闭）
 
@@ -176,9 +224,20 @@ RouterOS 的 REST 从 7.1beta4 开始提供，返回的 JSON 里数字和布尔�
 | 证书错误 | 改用 HTTP，或在确认是局域网自签证书后打开 `ROUTEROS_TLS_INSECURE`。 |
 | 有的区块是空的 | 路由器没有这项功能，或这个只读账号看不到。WireGuard、温度都属于这种情况，其它页面仍可用。 |
 
+## Star History
+
+[![Star History Chart](https://api.star-history.com/svg?repos=iceshu/ros-unifi-theme&type=Date)](https://www.star-history.com/#iceshu/ros-unifi-theme&Date)
+
+## 技术栈
+
+- SolidJS 2 + Tailwind CSS 4 + Vite 8 + TypeScript
+- Apache ECharts 6（按需引入：折线、饼图、仪表盘）+ Lucide 图标
+- Node.js 服务端代理（开发和生产共用同一份代码），无数据库
+
 ## 目录
 
 - `src/` SolidJS + Tailwind 页面
 - `server/ros-proxy.mjs` 默认只读、可选受限写操作的反向代理，开发和生产共用
 - `server/index.mjs` 生产进程，同时托管构建好的页面
+- `server/demo.mjs` 演示模式的样例数据
 - `docker-compose.yml` 在 N100 上的一条命令部署
