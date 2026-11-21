@@ -1,4 +1,4 @@
-# 在 N100 上：复制 .env.example 为 .env，填好密码，然后 docker compose up -d --build
+# 在 N100 上：复制 .env.example 为 .env，填好配置，然后 docker compose up -d --build
 # 密码只放在 .env，经 env_file 进入容器。不要在这个文件里写 ${ROUTEROS_PASSWORD}。
 services:
   dashboard:
@@ -12,6 +12,9 @@ services:
     environment:
       PORT: "8080"
       NODE_ENV: production
+    volumes:
+      # 设置、审计记录、告警历史、长期流量和配置备份都在这里，重建容器不会丢。
+      - dashboard-data:/app/data
     healthcheck:
       test:
         [
@@ -24,3 +27,6 @@ services:
       timeout: 5s
       retries: 3
       start_period: 15s
+
+volumes:
+  dashboard-data:

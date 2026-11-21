@@ -1,32 +1,81 @@
 import { createRouter } from "@solidjs/router";
+import { AddressesPage } from "./pages/Addresses";
+import { AddressListsPage } from "./pages/AddressLists";
+import { AppsPage } from "./pages/Apps";
+import { AuditPage } from "./pages/Audit";
+import { BackupsPage } from "./pages/Backups";
+import { BridgesPage } from "./pages/Bridges";
 import { ConnectionPage } from "./pages/Connection";
+import { ConnectionsPage } from "./pages/Connections";
 import { DevicesPage } from "./pages/Devices";
+import { DhcpPage } from "./pages/Dhcp";
+import { DnsPage } from "./pages/Dns";
+import { EventsPage } from "./pages/Events";
 import { FirewallPage } from "./pages/Firewall";
+import { InterfaceListsPage } from "./pages/InterfaceLists";
 import { InterfacesPage } from "./pages/Interfaces";
+import { NatPage } from "./pages/Nat";
 import { NotFoundPage } from "./pages/NotFound";
 import { OverviewPage } from "./pages/Overview";
+import { PortForwardPage } from "./pages/PortForward";
+import { PppoePage } from "./pages/Pppoe";
+import { QueuesPage } from "./pages/Queues";
+import { LogPage, NeighborsPage } from "./pages/ReadPages";
 import { RoutesPage } from "./pages/Routes";
+import { SchedulerPage } from "./pages/Scheduler";
+import { ScriptsPage } from "./pages/Scripts";
+import { SecurityPage } from "./pages/Security";
+import { ServicesPage } from "./pages/Services";
+import { SettingsPage } from "./pages/Settings";
+import { TerminalPage } from "./pages/Terminal";
+import { TimePage } from "./pages/Time";
+import { ToolsPage } from "./pages/Tools";
+import { TopologyPage } from "./pages/Topology";
+import { UpdatesPage } from "./pages/Updates";
+import { UsersPage } from "./pages/Users";
+import { VlansPage } from "./pages/Vlans";
+import { WifiPage } from "./pages/Wifi";
 import { WireGuardPage } from "./pages/WireGuard";
-
-import { NatPage, AddressListsPage, DhcpPage, DnsPage, NeighborsPage, QueuesPage, WifiPage, LogPage } from "./pages/ReadPages";
 
 export const Router = createRouter({
   routes: [
     { path: "/", component: OverviewPage },
+    { path: "/topology", component: TopologyPage },
     { path: "/devices", component: DevicesPage },
     { path: "/interfaces", component: InterfacesPage },
-    { path: "/firewall", component: FirewallPage },
+    { path: "/events", component: EventsPage },
+    { path: "/connections", component: ConnectionsPage },
+    { path: "/apps", component: AppsPage },
+    { path: "/tools", component: ToolsPage },
+    { path: "/wifi", component: WifiPage },
+    { path: "/pppoe", component: PppoePage },
     { path: "/routes", component: RoutesPage },
-    { path: "/wireguard", component: WireGuardPage },
-    { path: "/connection", component: ConnectionPage },
-    { path: "/nat", component: NatPage },
-    { path: "/address-lists", component: AddressListsPage },
+    { path: "/addresses", component: AddressesPage },
+    { path: "/vlans", component: VlansPage },
+    { path: "/bridges", component: BridgesPage },
+    { path: "/interface-lists", component: InterfaceListsPage },
     { path: "/dhcp", component: DhcpPage },
     { path: "/dns", component: DnsPage },
-    { path: "/neighbors", component: NeighborsPage },
     { path: "/queues", component: QueuesPage },
-    { path: "/wifi", component: WifiPage },
+    { path: "/neighbors", component: NeighborsPage },
+    { path: "/firewall", component: FirewallPage },
+    { path: "/port-forwarding", component: PortForwardPage },
+    { path: "/nat", component: NatPage },
+    { path: "/address-lists", component: AddressListsPage },
+    { path: "/wireguard", component: WireGuardPage },
+    { path: "/security", component: SecurityPage },
+    { path: "/backups", component: BackupsPage },
+    { path: "/updates", component: UpdatesPage },
+    { path: "/services", component: ServicesPage },
+    { path: "/scheduler", component: SchedulerPage },
+    { path: "/scripts", component: ScriptsPage },
+    { path: "/time", component: TimePage },
+    { path: "/users", component: UsersPage },
+    { path: "/terminal", component: TerminalPage },
+    { path: "/audit", component: AuditPage },
     { path: "/log", component: LogPage },
+    { path: "/settings", component: SettingsPage },
+    { path: "/connection", component: ConnectionPage },
     { path: "*404", component: NotFoundPage },
   ],
 });

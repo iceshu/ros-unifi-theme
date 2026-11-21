@@ -4,13 +4,13 @@
   "version": "0.1.0",
   "type": "module",
   "engines": {
-    "node": ">=22"
+    "node": ">=22.13"
   },
   "scripts": {
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
     "start": "node server/index.mjs",
-    "test": "node --test shared/format.test.mjs shared/traffic.test.mjs server/ros-proxy.test.mjs",
+    "test": "node --test shared/format.test.mjs shared/traffic.test.mjs server/writes.test.mjs server/auth.test.mjs server/ros-proxy.test.mjs server/history.test.mjs server/guard.test.mjs server/admin.test.mjs server/system.test.mjs server/netconf.test.mjs server/insight.test.mjs server/alerts.test.mjs server/maintenance.test.mjs",
     "check": "tsc --noEmit"
   },
   "dependencies": {
@@ -19,7 +19,8 @@
     "@solidjs/router": "^2.0.0",
     "@solidjs/web": "^2.0.3",
     "echarts": "^6.1.0",
-    "solid-js": "^2.0.3"
+    "solid-js": "^2.0.3",
+    "uqr": "^0.1.3"
   },
   "devDependencies": {
     "@solidjs/vite-plugin": "^3.0.1",

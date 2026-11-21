@@ -412,8 +412,9 @@ export function leaseIdentity(lease: RosRecord): { title: string; subtitle: stri
   const host = (lease["host-name"] || "").trim();
   const comment = (lease.comment || "").trim();
   const profile = deviceProfile(host, comment, lease["mac-address"] || "");
+  // Like UniFi aliases: a name set by the user (lease comment) wins over the DHCP host name.
   if (host && comment && host.toLowerCase() !== comment.toLowerCase()) {
-    return { title: host, subtitle: comment, kind: profile.kind };
+    return { title: comment, subtitle: host, kind: profile.kind };
   }
   if (host) return { title: host, subtitle: profile.vendor, kind: profile.kind };
   if (comment) return { title: comment, subtitle: profile.vendor, kind: profile.kind };

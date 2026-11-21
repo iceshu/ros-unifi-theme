@@ -10,11 +10,13 @@ import {
 import { ApiError, getMeta, getRest, toApiError, type Meta } from "./api";
 import {
   asRecords,
+  flag,
   parseHealth,
   pickTemperature,
   pickWanName,
   type RosRecord,
 } from "./model";
+import { collectClients, type TopoClient } from "./topology";
 import { ratesFromDeltas, summarizeConnections } from "./traffic";
 
 export interface Rate {
@@ -47,7 +49,8 @@ export type Selection =
   | { type: "client"; ip: string; mac: string }
   | { type: "iface"; name: string }
   | { type: "peer"; id: string }
-  | { type: "gateway" };
+  | { type: "gateway" }
+  | { type: "internet" };
 
 interface Counter {
   t: number;
@@ -87,6 +90,11 @@ export interface DashboardApi {
   wifi: Accessor<RosRecord[]>;
   wifiConfig: Accessor<RosRecord[]>;
   wifiRegistration: Accessor<RosRecord[]>;
+  wifiSecurity: Accessor<RosRecord[]>;
+  /** Legacy `wireless` package (older hAP/cAP): interfaces, clients, security profiles. */
+  wireless: Accessor<RosRecord[]>;
+  wirelessRegistration: Accessor<RosRecord[]>;
+  wirelessSecurity: Accessor<RosRecord[]>;
   pppActive: Accessor<RosRecord[]>;
   packages: Accessor<RosRecord[]>;
   logEntries: Accessor<RosRecord[]>;
@@ -110,7 +118,18 @@ export interface DashboardApi {
   primaryWan: Accessor<string | null>;
   wanNames: Accessor<string[]>;
   lanNames: Accessor<string[]>;
+  /** Name of the physical port under the PPPoE client, or the other configured WAN name. */
+  carrierName: Accessor<string>;
+  wanRow: Accessor<RosRecord | undefined>;
+  wanUp: Accessor<boolean>;
+  bridgeNames: Accessor<Set<string>>;
+  /** Every known client: DHCP leases, ARP-only hosts, WiFi registrations. */
+  clients: Accessor<TopoClient[]>;
   retry: () => void;
+  /** Re-read every menu now (after a change), not just interface counters. */
+  refresh: () => void;
+  /** Increments on every refresh(); page-level loaders (useRos) re-fetch when it changes. */
+  refreshTick: Accessor<number>;
 }
 
 const DashboardContext = createContext<DashboardApi>();
@@ -186,6 +205,10 @@ export function createDashboard(): DashboardApi {
   const [wifi, setWifi] = createSignal<RosRecord[]>([]);
   const [wifiConfig, setWifiConfig] = createSignal<RosRecord[]>([]);
   const [wifiRegistration, setWifiRegistration] = createSignal<RosRecord[]>([]);
+  const [wifiSecurity, setWifiSecurity] = createSignal<RosRecord[]>([]);
+  const [wireless, setWireless] = createSignal<RosRecord[]>([]);
+  const [wirelessRegistration, setWirelessRegistration] = createSignal<RosRecord[]>([]);
+  const [wirelessSecurity, setWirelessSecurity] = createSignal<RosRecord[]>([]);
   const [pppActive, setPppActive] = createSignal<RosRecord[]>([]);
   const [packages, setPackages] = createSignal<RosRecord[]>([]);
   const [logEntries, setLogEntries] = createSignal<RosRecord[]>([]);
@@ -204,6 +227,10 @@ export function createDashboard(): DashboardApi {
     "/rest/interface/wifi": setWifi,
     "/rest/interface/wifi/configuration": setWifiConfig,
     "/rest/interface/wifi/registration-table": setWifiRegistration,
+    "/rest/interface/wifi/security": setWifiSecurity,
+    "/rest/interface/wireless": setWireless,
+    "/rest/interface/wireless/registration-table": setWirelessRegistration,
+    "/rest/interface/wireless/security-profiles": setWirelessSecurity,
     "/rest/ppp/active": setPppActive,
     "/rest/system/package": setPackages,
     "/rest/log": (rows) => setLogEntries(rows.slice(-200)),
@@ -214,11 +241,33 @@ export function createDashboard(): DashboardApi {
   let lastClientBytes: { t: number; totals: Record<string, { up: number; down: number }> } | null = null;
   let wake = () => {};
   let hurry = false;
+  let forceSlow = false;
 
   const wanNames = createMemo(() => meta()?.wanInterfaces ?? ["liantong", "ether0"]);
   const lanNames = createMemo(() => meta()?.lanInterfaces ?? ["bridge1"]);
   const temperature = createMemo(() => pickTemperature(health()));
   const primaryWan = createMemo(() => pickWanName(interfaces(), wanNames()));
+  const wanRow = createMemo(() => interfaces().find((row) => row.name === primaryWan()));
+  const wanUp = createMemo(() => !!wanRow() && flag(wanRow()?.running) && !flag(wanRow()?.disabled));
+  const carrierName = createMemo(() => {
+    const parent = pppoe().find((row) => row.name === primaryWan())?.interface;
+    if (parent) return parent;
+    return wanNames().find((name) => name !== primaryWan() && interfaces().some((row) => row.name === name)) ?? "";
+  });
+  const bridgeNames = createMemo(() => {
+    const names = new Set<string>(lanNames());
+    for (const row of interfaces()) if (row.type === "bridge" && row.name) names.add(row.name);
+    return names;
+  });
+  const clients = createMemo(() => {
+    const ssidFor = (name: string) => {
+      const radio = wifi().find((row) => row.name === name);
+      if (!radio) return wireless().find((row) => row.name === name)?.ssid || "";
+      if (radio["configuration.ssid"]) return radio["configuration.ssid"];
+      return wifiConfig().find((row) => row.name === radio.configuration)?.ssid || "";
+    };
+    return collectClients(leases(), arp(), bridgeHosts() ?? [], bridgeNames(), [...wifiRegistration(), ...wirelessRegistration()], ssidFor);
+  });
 
   async function loadMeta(): Promise<ApiError | null> {
     try {
@@ -423,6 +472,14 @@ export function createDashboard(): DashboardApi {
     wake();
   }
 
+  const [refreshTick, setRefreshTick] = createSignal(0);
+  function refresh() {
+    forceSlow = true;
+    hurry = true;
+    setRefreshTick((value) => value + 1);
+    wake();
+  }
+
   onSettled(() => {
     let stopped = false;
     const sleep = (ms: number) =>
@@ -444,7 +501,8 @@ export function createDashboard(): DashboardApi {
         let slowError: ApiError | null = null;
         if (!metaError) {
           fastError = await pollInterfaces();
-          if (!fastError && (lastSlow === 0 || Date.now() - lastSlow >= 8000)) {
+          if (!fastError && (forceSlow || lastSlow === 0 || Date.now() - lastSlow >= 8000)) {
+            forceSlow = false;
             slowError = await pollSlow();
             lastSlow = Date.now();
           }
@@ -490,7 +548,8 @@ export function createDashboard(): DashboardApi {
     arp,
     firewall,
     nat, mangle, addressLists, dhcpServers, dhcpNetworks, pools, dns, dnsStatic,
-    neighbors, queues, vlans, wifi, wifiConfig, wifiRegistration, pppActive, packages, logEntries,
+    neighbors, queues, vlans, wifi, wifiConfig, wifiRegistration, wifiSecurity, wireless, wirelessRegistration, wirelessSecurity,
+    pppActive, packages, logEntries,
     routes,
     listMembers,
     bridgePorts,
@@ -511,7 +570,14 @@ export function createDashboard(): DashboardApi {
     primaryWan,
     wanNames,
     lanNames,
+    carrierName,
+    wanRow,
+    wanUp,
+    bridgeNames,
+    clients,
     retry,
+    refresh,
+    refreshTick,
   };
 }
 

@@ -1,4 +1,5 @@
 import { ReadTable } from "../components/ReadData";
+import { session } from "../lib/session";
 import { formatAgo } from "../lib/format";
 import { useDashboard } from "../lib/store";
 
@@ -13,7 +14,7 @@ const CARDS = [
     id: "auth",
     title: "认证失败",
     codes: ["auth", "not_configured", "creds_in_host"],
-    body: "检查 .env 里的用户名和密码。用户需要 read 和 rest-api 权限。密码不要写进 ROUTEROS_HOST。连续失败时页面会放慢重试，避免把路由器的登录限制打满。",
+    body: "路由器拒绝了这个账号：密码已改、账号被禁用，或所在组缺少 api / rest-api 权限。请重新登录。连续失败时登录会被暂时锁定一分钟，避免触发路由器的登录限制。",
   },
   {
     id: "net",
@@ -61,10 +62,16 @@ export function ConnectionPage() {
       </section>
       <section class="card mb-4 grid gap-4 p-5 md:grid-cols-2">
         <Field label="路由器" value={dash.meta()?.host || "—"} />
-        <Field label="写操作" value={dash.meta()?.writeEnabled ? "已启用" : "未启用"} />
-        <p class="text-sm text-warn">启用写操作需要单独的 RouterOS 用户具备 write 权限；必须仅限局域网使用，不要暴露公网。</p>
-        <Field label="用户" value={dash.meta()?.user || "未配置"} />
-        <Field label="密码" value={dash.meta()?.passwordConfigured ? "已在服务端配置" : "未配置"} />
+        <Field label="登录账号" value={`${session()?.user || "—"}（组 ${session()?.group || "未知"}）`} />
+        <div>
+          <p class="kicker">账号权限</p>
+          <p class="mt-1 flex flex-wrap gap-1">
+            {session()?.policiesKnown
+              ? (session()?.policies ?? []).map((policy) => <span class="policy-chip">{policy}</span>)
+              : <span class="text-sm text-muted">该账号读不到自己的组，按钮照常显示，由路由器决定是否允许。</span>}
+          </p>
+        </div>
+        <Field label="后台采样账号" value={dash.meta()?.serviceAccount ? ".env 中已配置" : "未配置，使用当前登录的账号"} />
         <Field label="证书校验" value={dash.meta()?.tlsInsecure ? "已跳过（仅建议用于局域网自签证书）" : "严格"} />
         <Field label="广域网接口" value={(dash.meta()?.wanInterfaces ?? ["liantong", "ether0"]).join("、")} />
         <Field label="局域网接口" value={(dash.meta()?.lanInterfaces ?? ["bridge1"]).join("、")} />
@@ -81,16 +88,25 @@ export function ConnectionPage() {
         })}
       </div>
       <section class="card mt-4 p-5">
-        <h2 class="font-semibold">代理允许读取的路径</h2>
-        <p class="mt-2 text-sm text-muted">其它路径会直接拒绝，包括用户、脚本、导出和 monitor-traffic。写操作默认关闭（405）；启用后仅允许接口、防火墙 filter 和 WireGuard peer 的启用/禁用。</p>
+        <h2 class="font-semibold">可修改的菜单</h2>
+        <p class="mt-2 text-sm text-muted">
+          页面用你登录的 RouterOS 账号访问路由器。账号所在组有 <span class="policy-chip">write</span> 才能修改，有{" "}
+          <span class="policy-chip">reboot</span> 才能重启；路由器也会再按账号权限检查一次。仪表只会修改下面这些菜单，用户、脚本、文件、证书、导入导出等一律拒绝。
+        </p>
+        <ul class="mt-3 grid gap-1 font-mono text-xs text-muted sm:grid-cols-2">
+          {(dash.meta()?.writeMenus ?? []).map((path) => (
+            <li>{path.replace(/^\/rest/, "") || "/"}</li>
+          ))}
+        </ul>
+        <h2 class="mt-6 font-semibold">允许读取的路径</h2>
         <ul class="mt-3 grid gap-1 font-mono text-xs text-muted sm:grid-cols-2">
           {(dash.meta()?.allowedPaths ?? []).map((path) => (
-            <li>{path}</li>
+            <li>{path.replace(/^\/rest/, "")}</li>
           ))}
         </ul>
         <p class="mt-4 text-sm text-muted">
-          要改地址或密码，编辑 N100 上的 <span class="font-mono">.env</span>，然后执行{" "}
-          <span class="font-mono">docker compose up -d</span>。改完才会生效。
+          要改路由器地址等服务端设置，编辑 N100 上的 <span class="font-mono">.env</span>，然后执行{" "}
+          <span class="font-mono">docker compose up -d</span>。
         </p>
       </section>
     </div>

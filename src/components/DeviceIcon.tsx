@@ -11,34 +11,48 @@ import {
   Video,
   Wifi,
 } from "@lucide/solid";
+import { dynamic } from "@solidjs/web";
 import type { DeviceKind } from "../lib/model";
 
-export function DeviceIcon(props: { kind: DeviceKind }) {
+const ICONS: Record<DeviceKind, typeof Wifi> = {
+  phone: Smartphone,
+  laptop: Laptop,
+  server: Server,
+  nas: HardDrive,
+  ap: Wifi,
+  camera: Video,
+  tv: Tv,
+  console: Gamepad2,
+  speaker: Speaker,
+  printer: Printer,
+  generic: CircleHelp,
+};
+
+export const KIND_LABELS: Record<DeviceKind, string> = {
+  phone: "手机 / 平板",
+  laptop: "笔记本",
+  server: "服务器",
+  nas: "网络存储",
+  ap: "无线接入点",
+  camera: "摄像头",
+  tv: "电视",
+  console: "游戏主机",
+  speaker: "音箱",
+  printer: "打印机",
+  generic: "其他设备",
+};
+
+/** Bare glyph, for places that supply their own frame (topology nodes). */
+export function DeviceGlyph(props: { kind: DeviceKind }) {
+  const Icon = dynamic(() => ICONS[props.kind] ?? CircleHelp);
+  return <Icon aria-hidden="true" />;
+}
+
+export function DeviceIcon(props: { kind: DeviceKind; online?: boolean }) {
   return (
-    <span class="grid h-8 w-8 shrink-0 place-items-center rounded-lg border border-line bg-panel-2 text-muted">
-      {props.kind === "phone" ? (
-        <Smartphone class="h-4 w-4" aria-hidden="true" />
-      ) : props.kind === "laptop" ? (
-        <Laptop class="h-4 w-4" aria-hidden="true" />
-      ) : props.kind === "server" ? (
-        <Server class="h-4 w-4" aria-hidden="true" />
-      ) : props.kind === "nas" ? (
-        <HardDrive class="h-4 w-4" aria-hidden="true" />
-      ) : props.kind === "ap" ? (
-        <Wifi class="h-4 w-4" aria-hidden="true" />
-      ) : props.kind === "camera" ? (
-        <Video class="h-4 w-4" aria-hidden="true" />
-      ) : props.kind === "tv" ? (
-        <Tv class="h-4 w-4" aria-hidden="true" />
-      ) : props.kind === "console" ? (
-        <Gamepad2 class="h-4 w-4" aria-hidden="true" />
-      ) : props.kind === "speaker" ? (
-        <Speaker class="h-4 w-4" aria-hidden="true" />
-      ) : props.kind === "printer" ? (
-        <Printer class="h-4 w-4" aria-hidden="true" />
-      ) : (
-        <CircleHelp class="h-4 w-4" aria-hidden="true" />
-      )}
+    <span class="dev-icon">
+      <DeviceGlyph kind={props.kind} />
+      {props.online !== undefined ? <i class={`led ${props.online ? "led-good" : "led-muted"}`} /> : null}
     </span>
   );
 }

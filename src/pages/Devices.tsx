@@ -1,243 +1,206 @@
+import { Cable, Wifi } from "@lucide/solid";
+import { createMemo, createSignal, For, Show } from "solid-js";
 import { CopyText } from "../components/CopyText";
+import { DeviceGlyph, DeviceIcon, KIND_LABELS } from "../components/DeviceIcon";
 import { createTableSort, SortHeader, useTableKeyboard } from "../components/TableSort";
-import { createEffect, createMemo, createSignal, For, type Accessor } from "solid-js";
-import { EmptyState, PageHeader, Pill } from "../components/ui";
-import { formatLastSeen, parseDurationSeconds } from "../lib/format";
-import { DeviceIcon } from "../components/DeviceIcon";
-import { EChart, chartColors, chartTooltip, type ChartOption } from "../components/charts";
-import { arpStatusLabel, arpStatusTone, dhcpStatusLabel, dhcpStatusTone, ipSortKey, leaseIdentity, type DeviceKind, type RosRecord } from "../lib/model";
-import { AllFields } from "../components/ReadData";
+import { EmptyState, PageHeader, RateText, Segmented } from "../components/ui";
+import { formatBytes, formatLastSeen, parseDurationSeconds } from "../lib/format";
+import { dhcpStatusLabel, ipSortKey, type DeviceKind } from "../lib/model";
 import { useDashboard } from "../lib/store";
+import { macKey, sameMac, type TopoClient } from "../lib/topology";
 
-const KIND_LABELS: Record<DeviceKind, string> = {
-  phone: "手机 / 平板", laptop: "笔记本", server: "服务器", nas: "网络存储", ap: "无线接入点",
-  camera: "摄像头", tv: "电视", console: "游戏主机", speaker: "音箱", printer: "打印机", generic: "其他设备",
-};
+type Status = "all" | "online" | "offline" | "wired" | "wireless";
 
-type Filter = "all" | "bound" | "idle" | "reachable";
-
-function macKey(value: string | undefined): string {
-  return (value || "").toLowerCase();
-}
-
-function matches(parts: Array<string | undefined>, query: string): boolean {
+function matches(client: TopoClient, query: string): boolean {
   const raw = query.trim().toLowerCase();
   if (!raw) return true;
-  const blob = parts.filter(Boolean).join(" ").toLowerCase();
-  const compact = raw.replace(/[:\-\s.]/g, "");
-  return blob.includes(raw) || blob.replace(/[:\-\s.]/g, "").includes(compact);
+  const blob = [client.title, client.subtitle, client.vendor, client.ip, client.mac, client.port, client.ssid].join(" ").toLowerCase();
+  return blob.includes(raw) || (macKey(raw).length >= 4 && macKey(blob).includes(macKey(raw)));
 }
 
 export function DevicesPage() {
   const dash = useDashboard();
   let search: HTMLInputElement | undefined;
-  const escape = useTableKeyboard(() => search);
-  const sorting = createTableSort<RosRecord>();
-  const sorted = () => sorting.rows(rows(), (row, key) => key === "ip" ? ipSortKey(row.address) : key === "hostname" ? row["host-name"] || leaseIdentity(row).title : key === "seen" ? parseDurationSeconds(row["last-seen"]) : row.status);
+  useTableKeyboard(() => search);
+  const sorting = createTableSort<TopoClient>();
   const [query, setQuery] = createSignal("");
-  const [filter, setFilter] = createSignal<Filter>("all");
+  const [status, setStatus] = createSignal<Status>("all");
   const [kind, setKind] = createSignal<DeviceKind | null>(null);
-  const distribution = createMemo(() => {
+
+  const traffic = (client: TopoClient) => (client.ip ? dash.clientTraffic()[client.ip] : undefined);
+  const kinds = createMemo(() => {
     const counts = new Map<DeviceKind, number>();
-    for (const lease of dash.leases()) {
-      const key = leaseIdentity(lease).kind;
-      counts.set(key, (counts.get(key) ?? 0) + 1);
-    }
+    for (const client of dash.clients()) counts.set(client.kind, (counts.get(client.kind) ?? 0) + 1);
     return [...counts].sort((a, b) => b[1] - a[1]);
   });
-  const donutOption = createMemo<ChartOption>(() => ({
-    color: [chartColors.download, chartColors.upload, chartColors.warn, chartColors.bad, chartColors.muted],
-    tooltip: { ...chartTooltip, trigger: "item", formatter: "{b}：{c} 台（{d}%）" },
-    legend: { type: "scroll", bottom: 0, textStyle: { color: chartColors.muted } },
-    series: [{
-      type: "pie", radius: ["45%", "70%"], center: ["50%", "43%"],
-      label: { show: false },
-      itemStyle: { borderColor: chartColors.background, borderWidth: 3, borderRadius: 5 },
-      emphasis: { label: { show: true, formatter: "{b}\n{c} 台", color: chartColors.ink } },
-      data: distribution().map(([key, value]) => ({
-        name: KIND_LABELS[key], value,
-        itemStyle: { opacity: kind() && kind() !== key ? 0.35 : 1 },
-      })),
-      animationDurationUpdate: 350,
-    }],
-  }));
-  const selectKind = (name: string) => {
-    const key = distribution().find(([key]) => KIND_LABELS[key] === name)?.[0];
-    if (key) setKind(kind() === key ? null : key);
-  };
-  const arpByMac = createMemo(() => {
-    const map = new Map<string, RosRecord>();
-    for (const row of dash.arp()) {
-      const key = macKey(row["mac-address"]);
-      if (key) map.set(key, row);
-    }
-    return map;
+  const counts = createMemo(() => {
+    const all = dash.clients();
+    return {
+      all: all.length,
+      online: all.filter((client) => client.online).length,
+      offline: all.filter((client) => !client.online).length,
+      wired: all.filter((client) => !client.wireless).length,
+      wireless: all.filter((client) => client.wireless).length,
+    };
   });
-  const rows = createMemo(() => {
-    const mode = filter();
-    return dash
-      .leases()
-      .filter((lease) => {
-        const arp = arpByMac().get(macKey(lease["mac-address"]));
-        if (kind() && leaseIdentity(lease).kind !== kind()) return false;
-        if (mode === "bound" && lease.status !== "bound") return false;
-        if (mode === "idle" && lease.status === "bound") return false;
-        if (mode === "reachable" && arp?.status !== "reachable") return false;
-        return matches([lease["host-name"], lease.address, lease["mac-address"], lease.comment, arp?.interface], query());
+
+  const rows = createMemo(() =>
+    dash
+      .clients()
+      .filter((client) => {
+        const mode = status();
+        if (mode === "online" && !client.online) return false;
+        if (mode === "offline" && client.online) return false;
+        if (mode === "wired" && client.wireless) return false;
+        if (mode === "wireless" && !client.wireless) return false;
+        if (kind() && client.kind !== kind()) return false;
+        return matches(client, query());
       })
-      .sort((a, b) => {
-        const bound = Number(b.status === "bound") - Number(a.status === "bound");
-        if (bound) return bound;
-        return ipSortKey(a.address) - ipSortKey(b.address);
-      });
+      .sort(
+        (a, b) =>
+          Number(b.online) - Number(a.online) ||
+          (traffic(b)?.rxBps ?? 0) + (traffic(b)?.txBps ?? 0) - ((traffic(a)?.rxBps ?? 0) + (traffic(a)?.txBps ?? 0)) ||
+          ipSortKey(a.ip) - ipSortKey(b.ip),
+      ),
+  );
+  const sorted = () =>
+    sorting.rows(rows(), (client, key) => {
+      if (key === "name") return client.title;
+      if (key === "ip") return ipSortKey(client.ip);
+      if (key === "port") return client.port || "~";
+      if (key === "down") return traffic(client)?.rxBps ?? -1;
+      if (key === "up") return traffic(client)?.txBps ?? -1;
+      if (key === "usage") return (traffic(client)?.downBytes ?? 0) + (traffic(client)?.upBytes ?? 0);
+      if (key === "seen") return parseDurationSeconds(client.lease?.["last-seen"]);
+      return null;
+    });
+  const selectedKey = createMemo(() => {
+    const selection = dash.selection();
+    if (selection?.type !== "client") return "";
+    return dash.clients().find((client) => sameMac(client.mac, selection.mac) || (!!selection.ip && client.ip === selection.ip))?.key ?? "";
   });
-  const arpOnly = createMemo(() => {
-    const known = new Set(dash.leases().map((lease) => macKey(lease["mac-address"])));
-    return dash
-      .arp()
-      .filter((row) => {
-        const key = macKey(row["mac-address"]);
-        return key && !known.has(key) && matches([row.address, row["mac-address"], row.interface], query());
-      })
-      .sort((a, b) => ipSortKey(a.address) - ipSortKey(b.address));
-  });
-  const boundCount = createMemo(() => dash.leases().filter((lease) => lease.status === "bound").length);
+
+  const open = (client: TopoClient) => dash.setSelection({ type: "client", ip: client.ip, mac: client.mac });
 
   return (
     <div>
-      <PageHeader title="设备">
-        <div class="text-xs text-faint">
-          {boundCount()} 在线 / {dash.leases().length}
-        </div>
-      </PageHeader>
-      <section class="card mb-4 px-4 py-3">
-        <div class="flex flex-wrap items-center justify-between gap-2">
-          <h2 class="text-sm font-medium">设备类型分布</h2>
-          <span class="text-xs text-faint">点击类型筛选，再次点击取消</span>
-        </div>
-        <EChart option={donutOption()} height={260} onClick={selectKind} />
-      </section>
-      <div class="mb-4 flex flex-wrap items-center gap-2">
+      <PageHeader title="客户端" subtitle={`${counts().online} 台在线 · 共 ${counts().all} 台 · 按 / 搜索，点击行查看详情`}>
         <input
           ref={search}
-          aria-label="搜索"
+          aria-label="搜索客户端"
           class="field"
           type="search"
-          placeholder="搜索"
+          placeholder="名称、IP、MAC、端口…"
           value={query()}
           onInput={(event) => setQuery(event.currentTarget.value)}
         />
-        <FilterChip label="全部" on={filter() === "all" && kind() === null} click={() => { setFilter("all"); setKind(null); }} />
-        {kind() ? <FilterChip label={`${KIND_LABELS[kind()!]} ×`} on={true} click={() => setKind(null)} /> : null}
-        <FilterChip label="已绑定" on={filter() === "bound"} click={() => setFilter("bound")} />
-        <FilterChip label="未绑定" on={filter() === "idle"} click={() => setFilter("idle")} />
-        <FilterChip label="ARP 可达" on={filter() === "reachable"} click={() => setFilter("reachable")} />
+      </PageHeader>
+
+      <div class="mb-3 flex flex-wrap items-center gap-2">
+        <Segmented
+          label="状态"
+          value={status()}
+          onChange={setStatus}
+          options={[
+            { value: "all", label: `全部 ${counts().all}` },
+            { value: "online", label: `在线 ${counts().online}` },
+            { value: "offline", label: `离线 ${counts().offline}` },
+            { value: "wired", label: `有线 ${counts().wired}` },
+            { value: "wireless", label: `无线 ${counts().wireless}` },
+          ]}
+        />
+        <span class="mx-1 h-5 w-px bg-line" />
+        <For each={kinds()}>
+          {([key, count]) => (
+            <button type="button" class={kind() === key ? "chip is-on" : "chip"} aria-pressed={kind() === key ? "true" : "false"} onClick={() => setKind(kind() === key ? null : key)}>
+              <span class="[&>svg]:h-3.5 [&>svg]:w-3.5">
+                <DeviceGlyph kind={key} />
+              </span>
+              {KIND_LABELS[key]}
+              <span class="count">{count}</span>
+            </button>
+          )}
+        </For>
       </div>
-      {rows().length === 0 ? (
-        <EmptyState title={dash.ready() ? "没有设备" : "正在读取"} />
-      ) : (
-        <div class="card overflow-x-auto">
+
+      <Show when={sorted().length > 0} fallback={<EmptyState title={dash.ready() ? "没有匹配的客户端" : "正在读取"} />}>
+        <section class="card table-wrap">
           <table class="data-table">
             <thead>
               <tr>
-                <SortHeader column="hostname" state={sorting.sort()} toggle={sorting.toggle}>设备</SortHeader>
-                <SortHeader column="ip" state={sorting.sort()} toggle={sorting.toggle}>IP</SortHeader>
-                <th>MAC</th>
-                <SortHeader column="status" state={sorting.sort()} toggle={sorting.toggle}>租约</SortHeader>
-                <SortHeader column="seen" state={sorting.sort()} toggle={sorting.toggle}>最近出现</SortHeader>
-                <th>ARP</th>
+                <SortHeader column="name" state={sorting.sort()} toggle={sorting.toggle}>名称</SortHeader>
+                <SortHeader column="port" state={sorting.sort()} toggle={sorting.toggle}>连接</SortHeader>
+                <SortHeader column="ip" state={sorting.sort()} toggle={sorting.toggle}>IP 地址</SortHeader>
+                <th>MAC 地址</th>
+                <SortHeader column="down" state={sorting.sort()} toggle={sorting.toggle}>下载</SortHeader>
+                <SortHeader column="up" state={sorting.sort()} toggle={sorting.toggle}>上传</SortHeader>
+                <SortHeader column="usage" state={sorting.sort()} toggle={sorting.toggle}>连接用量</SortHeader>
+                <SortHeader column="seen" state={sorting.sort()} toggle={sorting.toggle}>最近活动</SortHeader>
               </tr>
             </thead>
             <tbody>
-              <For each={sorted()} keyed={(row) => row[".id"] || row["mac-address"] || row.address}>
-                {(row) => <LeaseRow lease={row()} escape={escape} arp={arpByMac().get(macKey(row()["mac-address"]))} />}
+              <For each={sorted()} keyed={(client) => client.key}>
+                {(client) => {
+                  const rate = () => traffic(client());
+                  return (
+                    <tr
+                      class={`is-clickable ${client().online ? "" : "is-dim"} ${selectedKey() === client().key ? "is-selected" : ""}`}
+                      tabindex={0}
+                      onClick={() => open(client())}
+                      onKeyDown={(event) => {
+                        if (event.target === event.currentTarget && (event.key === "Enter" || event.key === " ")) {
+                          event.preventDefault();
+                          open(client());
+                        }
+                      }}
+                    >
+                      <td>
+                        <div class="client">
+                          <DeviceIcon kind={client().kind} online={client().online} />
+                          <div class="min-w-0">
+                            <div class="client-name truncate">{client().title}</div>
+                            <div class="client-sub truncate">{client().subtitle || client().vendor || KIND_LABELS[client().kind]}</div>
+                          </div>
+                        </div>
+                      </td>
+                      <td class="whitespace-nowrap text-[12.5px]">
+                        {client().port ? (
+                          <span class="inline-flex items-center gap-1.5">
+                            {client().wireless ? <Wifi class="h-3.5 w-3.5 text-accent" aria-hidden="true" /> : <Cable class="h-3.5 w-3.5 text-muted" aria-hidden="true" />}
+                            <span>{client().wireless ? client().ssid || client().port : client().port}</span>
+                            {client().signal ? <span class="text-faint">{client().signal}</span> : null}
+                          </span>
+                        ) : (
+                          <span class="text-faint">未定位</span>
+                        )}
+                      </td>
+                      <td>{client().ip ? <CopyText class="font-mono text-[12.5px]" value={client().ip} /> : <span class="text-faint">—</span>}</td>
+                      <td>{client().mac ? <CopyText class="font-mono text-[12px] text-muted" value={client().mac} /> : "—"}</td>
+                      <td>
+                        <RateText bps={rate()?.rxBps} class={(rate()?.rxBps ?? 0) > 0 ? "rate-down" : "text-faint"} />
+                      </td>
+                      <td>
+                        <RateText bps={rate()?.txBps} class={(rate()?.txBps ?? 0) > 0 ? "rate-up" : "text-faint"} />
+                      </td>
+                      <td class="whitespace-nowrap text-[12.5px] text-muted num">
+                        {rate() ? formatBytes((rate()?.downBytes ?? 0) + (rate()?.upBytes ?? 0)) : "—"}
+                        {rate()?.connections ? <span class="ml-1 text-faint">· {rate()?.connections} 条</span> : null}
+                      </td>
+                      <td class="whitespace-nowrap text-[12.5px]">
+                        <div>{client().lease ? formatLastSeen(client().lease?.["last-seen"]) : client().online ? "在线" : "—"}</div>
+                        <div class="text-[11.5px] text-faint">{client().lease ? dhcpStatusLabel(client().lease?.status) : client().arp ? "仅 ARP" : "无线注册"}</div>
+                      </td>
+                    </tr>
+                  );
+                }}
               </For>
             </tbody>
           </table>
-        </div>
-      )}
-      {arpOnly().length > 0 ? (
-        <section class="mt-6">
-          <h2 class="mb-2 text-xs text-faint">ARP</h2>
-          <div class="card overflow-x-auto">
-            <table class="data-table">
-              <thead>
-                <tr>
-                  <th>IP</th>
-                  <th>MAC</th>
-                  <th>接口</th>
-                  <th>状态</th>
-                </tr>
-              </thead>
-              <tbody>
-                <For each={arpOnly()} keyed={(row) => row[".id"] || row.address}>
-                  {(row) => (
-                    <tr
-                      class="cursor-pointer"
-                      tabindex={0}
-                      onKeyDown={(event) => { if (event.target === event.currentTarget && (event.key === "Enter" || event.key === " ")) { event.preventDefault(); dash.setSelection({ type: "client", ip: row().address || "", mac: row()["mac-address"] || "" }); } }}
-                      onClick={(event) => { event.currentTarget.focus(); dash.setSelection({ type: "client", ip: row().address || "", mac: row()["mac-address"] || "" }); }}
-                    >
-                      <td class="font-mono"><CopyText value={row().address || ""} /></td>
-                      <td class="font-mono"><CopyText value={row()["mac-address"] || ""} /></td>
-                      <td>{row().interface || "—"}</td>
-                      <td>
-                        <Pill tone={arpStatusTone(row().status)}>{arpStatusLabel(row().status)}</Pill>
-                      </td>
-                    </tr>
-                  )}
-                </For>
-              </tbody>
-            </table>
-          </div>
         </section>
-      ) : null}
+      </Show>
+      <p class="mt-2 text-[11.5px] text-faint">
+        速率与用量来自防火墙连接表，只统计当前活动连接，不是设备的长期总用量。
+      </p>
     </div>
-  );
-}
-
-function LeaseRow(props: { lease: RosRecord; arp: RosRecord | undefined; escape: Accessor<number> }) {
-  const dash = useDashboard();
-  const [expanded, setExpanded] = createSignal(false);
-  createEffect(() => props.escape(), () => { setExpanded(false); });
-  const identity = () => leaseIdentity(props.lease);
-  return (
-    <>
-    <tr class="cursor-pointer" tabindex={0}
-      onKeyDown={(event) => { if (event.target === event.currentTarget && (event.key === "Enter" || event.key === " ")) { event.preventDefault(); dash.setSelection({ type: "client", ip: props.lease.address || "", mac: props.lease["mac-address"] || "" }); } }}
-      onClick={(event) => { event.currentTarget.focus(); dash.setSelection({ type: "client", ip: props.lease.address || "", mac: props.lease["mac-address"] || "" }); }}>
-      <td>
-        <div class="client">
-          <DeviceIcon kind={identity().kind} />
-          <div class="min-w-0">
-            <button type="button" class={`client-name truncate ${identity().title === "未知" ? "text-faint" : ""}`} aria-label={identity().title} aria-expanded={expanded() ? "true" : "false"} onClick={(event) => { event.stopPropagation(); setExpanded(!expanded()); }}>{expanded() ? "▾" : "▸"}</button>{" "}<CopyText class={`client-name truncate ${identity().title === "未知" ? "text-faint" : ""}`} value={identity().title}>{identity().title}</CopyText>
-            {identity().subtitle ? <div class="client-sub truncate"><CopyText value={identity().subtitle}>{identity().subtitle}</CopyText></div> : null}
-          </div>
-        </div>
-      </td>
-      <td class="font-mono text-xs text-muted">{props.lease.address ? <CopyText value={props.lease.address} /> : "—"}</td>
-      <td class="font-mono text-xs text-faint">{props.lease["mac-address"] ? <CopyText value={props.lease["mac-address"]} /> : "—"}</td>
-      <td>
-        <Pill tone={dhcpStatusTone(props.lease.status)}>{dhcpStatusLabel(props.lease.status)}</Pill>
-        {props.lease["expires-after"] ? (
-          <div class="mt-1 text-xs text-faint">剩余 {props.lease["expires-after"]}</div>
-        ) : null}
-      </td>
-      <td>{formatLastSeen(props.lease["last-seen"])}</td>
-      <td>
-        <Pill tone={arpStatusTone(props.arp?.status)}>{arpStatusLabel(props.arp?.status)}</Pill>
-        {props.arp?.interface ? <div class="mt-1 text-xs text-faint">{props.arp.interface}</div> : null}
-      </td>
-    </tr>
-    {expanded() ? <tr><td colspan={6}><h3 class="text-xs text-faint">全部字段</h3><AllFields row={props.lease} copy /></td></tr> : null}
-    </>
-  );
-}
-
-function FilterChip(props: { label: string; on: boolean; click: () => void }) {
-  return (
-    <button type="button" class={props.on ? "chip is-on" : "chip"} aria-pressed={props.on ? "true" : "false"} onClick={() => props.click()}>
-      {props.label}
-    </button>
   );
 }
