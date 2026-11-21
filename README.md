@@ -1,35 +1,31 @@
-# 网关
+# ros-unifi-theme · 网关
 
 [![GitHub stars](https://img.shields.io/github/stars/iceshu/ros-unifi-theme?style=flat-square)](https://github.com/iceshu/ros-unifi-theme/stargazers)
 [![GitHub forks](https://img.shields.io/github/forks/iceshu/ros-unifi-theme?style=flat-square)](https://github.com/iceshu/ros-unifi-theme/network/members)
 [![GitHub issues](https://img.shields.io/github/issues/iceshu/ros-unifi-theme?style=flat-square)](https://github.com/iceshu/ros-unifi-theme/issues)
 [![Last commit](https://img.shields.io/github/last-commit/iceshu/ros-unifi-theme?style=flat-square)](https://github.com/iceshu/ros-unifi-theme/commits/main)
 
-放在局域网里的 RouterOS 管理后台，界面和交互向 UniFi Network 靠拢（浅色 / 深色可切换）：打开就能看到路由器是否在线、互联网通不通、谁在用网、流量走向哪里；能改端口转发、防火墙、固定 IP、限速、WiFi、WireGuard、VLAN、网桥、路由、PPPoE、服务、计划任务、脚本、用户等设置；还有告警通知（飞书 / 钉钉 / 企业微信 / Telegram / Bark / ntfy / Webhook）、30 天流量历史、定时配置备份与对比、系统更新、诊断工具、连接与应用流量、安全检查、Web 终端和操作审计。数据和修改都通过 MikroTik RouterOS 7 的 REST API 完成，服务跑在你自己的 N100 上，数据存在一个 SQLite 文件里。
+局域网里的 MikroTik RouterOS 7 管理后台，界面和交互向 UniFi Network 靠拢（浅色 / 深色可切换）：打开就能看到路由器是否在线、互联网通不通、谁在用网、流量走向哪里；能改端口转发、防火墙、固定 IP、限速、WiFi、WireGuard、VLAN、网桥、路由、PPPoE、服务、计划任务、脚本、用户等设置；还有告警通知（飞书 / 钉钉 / 企业微信 / Telegram / Bark / ntfy / Webhook）、30 天流量历史、定时配置备份与对比、系统更新、诊断工具、连接与应用流量、安全检查、Web 终端和操作审计。
+
+就是一个 Web 应用，跑在局域网里任意一台机器上都行：Docker 一条命令，或者 Node.js 直接跑。数据和修改都通过 RouterOS 7 的 REST API 完成，设置、告警、审计、流量历史存在一个 SQLite 文件里。
 
 **用 RouterOS 账号登录，能做什么由这个账号决定。** 打开页面先登录；仪表用你输入的 RouterOS 账号去访问路由器，并读取该账号所在组的权限（`read`、`write`、`reboot` …）：只读组只能看，带 `write` 的组可以改配置，带 `reboot` 的组才看得到“重启”。路由器本身仍会按这个账号的权限拒绝越权操作。
 
-默认按这台家里的路由器来写示例，地址都可以改：
-
-- 路由器 `192.168.2.1`
-- 局域网 `192.168.2.0/24`
-- PPPoE 接口 `liantong`
-- 物理广域网口 `ether0`
-- 局域网桥 `bridge1`
-
-浏览器不直连路由器。N100 上的小服务托管页面，把 `/rest` 转到路由器。登录的 RouterOS 密码只留在服务进程内存里（退出登录、闲置超时或重启后丢弃），浏览器只拿到一个 HttpOnly 会话 Cookie。
+浏览器不直连路由器。服务器托管页面，把 `/rest` 转到路由器。登录的 RouterOS 密码只留在服务进程内存里（退出登录、闲置超时或重启后丢弃），浏览器只拿到一个 HttpOnly 会话 Cookie。
 
 ```text
-浏览器  --Cookie-->  N100:8080  --REST + Basic（登录账号）-->  192.168.2.1/rest
+浏览器  --Cookie-->  服务器:8080  --REST + Basic（登录账号）-->  路由器/rest
 ```
+
+下面所有地址、接口名都是**示例**，请换成你自己的：路由器 `192.168.1.1`、局域网 `192.168.1.0/24`、PPPoE 接口 `pppoe-out1`、物理广域网口 `ether1`、局域网桥 `bridge`。
 
 ## 先看安全
 
-- **www 或 www-ssl 必须已经开着。** 这个项目不会替你启用它们。`www-ssl`（HTTPS）从 RouterOS 7.1 起就能用；明文 `www` 要 RouterOS 7.9 及以上。明文 HTTP 下登录密码会在 N100 与路由器之间以 Basic 认证传输，N100 和路由器都在你自己的局域网里时可以接受；更稳妥的是 `https://192.168.2.1`，自签证书再把 `ROUTEROS_TLS_INSECURE=true`。
+- **www 或 www-ssl 必须已经开着。** 这个项目不会替你启用它们。`www-ssl`（HTTPS）从 RouterOS 7.1 起就能用；明文 `www` 要 RouterOS 7.9 及以上。明文 HTTP 下登录密码会在服务器与路由器之间以 Basic 认证传输，服务器和路由器都在你自己的局域网里时可以接受；更稳妥的是 `https://<路由器地址>`，自签证书再把 `ROUTEROS_TLS_INSECURE=true`。
 - **按用途建账号和组。** 日常查看用只读组；需要改配置时用带 `write` 的组；不需要的权限不要给。仪表只会做下文“可修改的内容”里列出的操作，其它菜单（文件、证书、导入等）即使账号有权限也会被代理拒绝。
 - **防失联保护。** 服务端在转发修改前会检查：禁用/删除仪表正在使用的接口、管理地址、所在网桥端口、`www`/`www-ssl` 服务，以及修改自己的账号和组，会直接拒绝；删除默认路由、禁用 input 链放行规则、新增 input 丢弃规则等风险操作会先弹窗确认。
-- **终端**会以登录账号执行任意 RouterOS 命令（需要 `write`），每条命令都会写入审计（`password=`、`*-key=` 等参数值会被打码）。
-- **不要把仪表暴露到公网。** 不要在路由器上做 8080 的端口转发，也不要把它挂到 WAN 地址上。需要的话把 `DASHBOARD_BIND` 设成 N100 的局域网地址。
+- **终端**会以登录账号执行任意 RouterOS 命令（需要 `write`），每条命令都会写入审计（`password=<redacted>` 等参数值会被打码）。
+- **不要把仪表暴露到公网。** 不要在路由器上做 8080 的端口转发，也不要把它挂到 WAN 地址上。需要的话把 `DASHBOARD_BIND` 设成服务器的局域网地址。
 - 登录失败会被限速：同一来源一分钟内失败 5 次后锁定一分钟，避免触发路由器自己的登录限制。
 
 在路由器上建账号（这些命令要你自己在路由器上执行）。REST 需要 `api` 和 `rest-api` 两个策略：
@@ -49,29 +45,29 @@
 建议把 Web 服务限制在局域网：
 
 ```routeros
-/ip service set [find name=www] address=192.168.2.0/24
-/ip service set [find name=www-ssl] address=192.168.2.0/24
+/ip service set [find name=www] address=192.168.1.0/24
+/ip service set [find name=www-ssl] address=192.168.1.0/24
 ```
 
-## 在 N100 上跑起来
+## 用 Docker 跑起来
 
-需要 Docker 和 Docker Compose，机器要能访问 `192.168.2.1`。
+需要 Docker 和 Docker Compose，机器要能访问路由器。
 
 ```bash
 cp .env.example .env
 ```
 
-编辑 `.env`：
+编辑 `.env`，填你自己的路由器地址和接口名：
 
 ```env
-ROUTEROS_HOST=http://192.168.2.1
-WAN_INTERFACES=liantong,ether0
-LAN_INTERFACES=bridge1
+ROUTEROS_HOST=http://192.168.1.1
+WAN_INTERFACES=pppoe-out1,ether1
+LAN_INTERFACES=bridge
 DASHBOARD_BIND=0.0.0.0
 DASHBOARD_PORT=8080
 # 可选：后台流量采样用的只读账号，见下文
 ROUTEROS_USER=viewer
-ROUTEROS_PASSWORD=换成强密码
+ROUTEROS_PASSWORD=<redacted>
 ```
 
 密码里如果有 `$`，在 `.env` 里写成 `$$`，否则 Compose 会把它当成变量。
@@ -80,21 +76,22 @@ ROUTEROS_PASSWORD=换成强密码
 docker compose up -d --build
 ```
 
-然后在局域网里打开 `http://<N100 的地址>:8080`，用 RouterOS 账号登录。以后改了 `.env`，再执行一次 `docker compose up -d`。
+然后在局域网里打开 `http://<服务器地址>:8080`，例如 `http://192.168.1.100:8080`，用 RouterOS 账号登录。以后改了 `.env`，再执行一次 `docker compose up -d`。
 
 容器里的健康检查只访问本机的 `/api/health`，路由器关掉时容器仍会保持运行，页面上会显示连不上的原因。
 
-## 本地开发
+## 直接跑（不用 Docker）
 
 需要 Node.js 22.13 或更新版本（用到内置的 `node:sqlite`）。
 
 ```bash
 npm install
 cp .env.example .env
-npm run dev
+npm run build
+npm start
 ```
 
-打开 `http://localhost:5173`。开发服务器在收到 `/rest/*` 和 `/api/*` 时，用和生产环境同一份代理代码处理（登录、白名单、写操作校验都一样）。
+默认监听 `8080`。`npm start` 会读取当前目录的 `.env`。想开发调试就用 `npm run dev`，打开 `http://localhost:5173`；开发服务器在收到 `/rest/*` 和 `/api/*` 时，用和生产环境同一份代理代码处理（登录、白名单、写操作校验都一样）。
 
 没有路由器、只想看界面时：
 
@@ -104,14 +101,11 @@ DEMO_MODE=true npm run dev
 
 演示模式下任意用户名和密码都能登录，账号拥有全部权限；所有修改只作用于服务进程内存里的演示数据，重启即恢复。页面顶部会一直写着「演示模式」。
 
-生产构建也可以不经过 Docker：
+测试：
 
 ```bash
-npm run build
-npm start
+npm test
 ```
-
-默认监听 `8080`。`npm start` 会读取当前目录的 `.env`。
 
 ## 页面
 
@@ -146,7 +140,7 @@ npm start
 
 单台客户端的速率与用量来自 `/ip/firewall/connection` 连接表，只统计当前活动连接，且只保留打开页面后的采样；接口曲线来自服务端的历史采样（见下文），刷新页面也不会丢。
 
-互联网吞吐取 `WAN_INTERFACES` 里的 PPPoE 接口（默认 `liantong`）。`ether0` 是拨号的物理口，速率不再加一次，否则同一份流量会算两遍。
+互联网吞吐取 `WAN_INTERFACES` 里的 PPPoE 接口。拨号的物理口速率不再加一次，否则同一份流量会算两遍。
 
 ## 可修改的内容
 
@@ -198,10 +192,10 @@ RouterOS 的 REST 从 7.1beta4 开始提供，返回的 JSON 里数字和布尔�
 
 | 变量 | 作用 |
 | --- | --- |
-| `ROUTEROS_HOST` | 路由器原点，例如 `http://192.168.2.1` 或 `https://192.168.2.1`。不要写用户名、密码，也不要带 `/rest`。缺省就是 `http://192.168.2.1`。 |
+| `ROUTEROS_HOST` | 路由器原点，例如 `http://192.168.1.1` 或 `https://192.168.1.1`。不要写用户名、密码，也不要带 `/rest`。 |
 | `ROUTEROS_USER` / `ROUTEROS_PASSWORD` | 可选。后台账号：流量采样、告警、定时备份、更新检查。登录页面不使用它们。不要提交 `.env`。 |
 | `ROUTEROS_TLS_INSECURE` | `true` 时跳过这台路由器的 TLS 证书校验。 |
-| `WAN_INTERFACES` / `LAN_INTERFACES` | 逗号分隔。默认 `liantong,ether0` 和 `bridge1`。 |
+| `WAN_INTERFACES` / `LAN_INTERFACES` | 逗号分隔的接口名，例如 `pppoe-out1,ether1` 和 `bridge`，按你的实际接口填。 |
 | `SESSION_TTL_HOURS` | 登录会话闲置多久失效，默认 12。 |
 | `DEMO_MODE` | `true` 时不访问路由器，任意账号可登录，修改只作用于内存中的演示数据。 |
 | `DASHBOARD_BIND` / `DASHBOARD_PORT` | 宿主机上的监听地址和端口，默认 `0.0.0.0:8080`。 |
@@ -218,9 +212,19 @@ RouterOS 的 REST 从 7.1beta4 开始提供，返回的 JSON 里数字和布尔�
 | 登录后看不到“新建”“编辑”按钮 | 该账号的组没有 `write`；“重启”需要 `reboot`。侧栏底部和“连接”页显示当前账号的权限。 |
 | 操作提示没有权限 | 路由器按账号权限拒绝了这个操作。 |
 | 连接被拒绝 | `www` 或 `www-ssl` 是否已经启用，地址和端口是否正确。 |
-| 超时或不可达 | N100 能否 ping 通 `192.168.2.1`，中间有没有防火墙。 |
+| 超时或不可达 | 服务器能否 ping 通路由器，中间有没有防火墙。 |
 | 证书错误 | 改用 HTTP，或在确认是局域网自签证书后打开 `ROUTEROS_TLS_INSECURE`。 |
 | 有的区块是空的 | 路由器没有这项功能，或这个账号看不到。WireGuard、WiFi、温度都属于这种情况，其它页面仍可用。 |
+
+## Star History
+
+[![Star History Chart](https://api.star-history.com/svg?repos=iceshu/ros-unifi-theme&type=Date)](https://www.star-history.com/#iceshu/ros-unifi-theme&Date)
+
+## 技术栈
+
+- SolidJS 2 + Tailwind CSS 4 + Vite 8 + TypeScript
+- Apache ECharts 6（按需引入：折线、饼图、仪表盘）+ Lucide 图标
+- Node.js 服务端代理（开发和生产共用同一份代码），无数据库以外的依赖；数据存在 SQLite（Node 内置 `node:sqlite`）
 
 ## 目录
 
@@ -232,8 +236,4 @@ RouterOS 的 REST 从 7.1beta4 开始提供，返回的 JSON 里数字和布尔�
 - `server/history.mjs` 后台流量采样
 - `server/demo.mjs` 演示数据（可写的内存副本）
 - `server/index.mjs` 生产进程，同时托管构建好的页面
-- `docker-compose.yml` 在 N100 上的一条命令部署
-
-## Star History
-
-[![Star History Chart](https://api.star-history.com/svg?repos=iceshu/ros-unifi-theme&type=Date)](https://www.star-history.com/#iceshu/ros-unifi-theme&Date)
+- `docker-compose.yml` 一条命令部署
